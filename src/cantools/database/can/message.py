@@ -79,6 +79,8 @@ class Message:
                  send_type: Optional[str] = None,
                  type: Optional[str] = None,
                  cycle_time: Optional[int] = None,
+                 delay_time: Optional[int] = None,
+                 start_delay_time: Optional[int] = None,
                  dbc_specifics: Optional['DbcSpecifics'] = None,
                  autosar_specifics: Optional['AutosarMessageSpecifics'] = None,
                  is_extended_frame: bool = False,
@@ -135,6 +137,8 @@ class Message:
         self._send_type = send_type
         self._type = type
         self._cycle_time = cycle_time
+        self._delay_time = delay_time
+        self._start_delay_time = start_delay_time
         self._dbc = dbc_specifics
         self._autosar = autosar_specifics
         self._bus_name = bus_name
@@ -462,6 +466,22 @@ class Message:
         """
 
         return self._cycle_time
+
+    @property
+    def delay_time(self) -> Optional[int]:
+        """The message delay time, or ``None`` if unavailable.
+
+        """
+
+        return self._delay_time
+
+    @property
+    def start_delay_time(self) -> Optional[int]:
+        """The start delay time, or ``None`` if unavailable.
+
+        """
+
+        return self._start_delay_time
 
     @cycle_time.setter
     def cycle_time(self, value: Optional[int]) -> None:
@@ -1335,4 +1355,4 @@ class Message:
             f'0x{self._frame_id:x}, ' \
             f'{self._is_extended_frame}, '\
             f'{self._length}, ' \
-            f'{self._comments})' \
+            f'{self._comments})'

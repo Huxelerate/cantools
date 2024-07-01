@@ -1575,11 +1575,9 @@ def _load_messages(tokens,
             return comments[frame_id_dbc]['message']
         except KeyError:
             return None
-
-    def get_type(frame_id_dbc):
-        """Get type for a given message.
-
-        """
+        
+    def get_attribute_value(frame_id_dbc, attribute):
+        """Get the attribute value of a given frame id"""
 
         result = None
         message_attributes = get_attributes(frame_id_dbc)
@@ -1588,93 +1586,19 @@ def _load_messages(tokens,
             return result
 
         try:
-            result = message_attributes['Type'].value
+            result = message_attributes[attribute].value
 
             # if definitions is enum (otherwise above value is maintained) -> Prevents ValueError
-            if definitions['Type'].choices is not None:
+            if definitions[attribute].choices is not None:
                 # Resolve ENUM index to ENUM text
-                result = definitions['Type'].choices[int(result)]
+                result = definitions[attribute].choices[int(result)]
         except (KeyError, TypeError):
             try:
-                result = definitions['Type'].default_value
+                result = definitions[attribute].default_value
             except (KeyError, TypeError):
                 result = None
 
         return result
-
-    def get_send_type(frame_id_dbc):
-        """Get send type for a given message.
-
-        """
-
-        result = None
-        message_attributes = get_attributes(frame_id_dbc)
-
-        try:
-            result = message_attributes['GenMsgSendType'].value
-
-            # if definitions is enum (otherwise above value is maintained) -> Prevents ValueError
-            if definitions['GenMsgSendType'].choices is not None:
-                # Resolve ENUM index to ENUM text
-                result = definitions['GenMsgSendType'].choices[int(result)]
-        except (KeyError, TypeError):
-            try:
-                result = definitions['GenMsgSendType'].default_value
-            except (KeyError, TypeError):
-                result = None
-
-        return result
-
-    def get_cycle_time(frame_id_dbc):
-        """Get cycle time for a given message.
-
-        """
-        message_attributes = get_attributes(frame_id_dbc)
-
-        gen_msg_cycle_time_def = definitions.get('GenMsgCycleTime')
-        if gen_msg_cycle_time_def is None:
-            return None
-
-        if message_attributes:
-            gen_msg_cycle_time_attr = message_attributes.get('GenMsgCycleTime')
-            if gen_msg_cycle_time_attr:
-                return gen_msg_cycle_time_attr.value or None
-
-        return gen_msg_cycle_time_def.default_value or None
-
-    def get_delay_time(frame_id_dbc):
-        """Get delay time for a given message.
-
-        """
-        message_attributes = get_attributes(frame_id_dbc)
-
-        gen_msg_delay_time_def = definitions.get('GenMsgDelayTime')
-        if gen_msg_delay_time_def is None:
-            return None
-
-        if message_attributes:
-            gen_msg_delay_time_attr = message_attributes.get('GenMsgDelayTime')
-            if gen_msg_delay_time_attr:
-                return gen_msg_delay_time_attr.value or None
-
-        return gen_msg_delay_time_def.default_value or None
-
-    def get_start_delay_time(frame_id_dbc):
-        """Get start delay time for a given message.
-
-        """
-        message_attributes = get_attributes(frame_id_dbc)
-
-        gen_msg_start_delay_time_def = definitions.get('GenMsgStartDelayTime')
-        if gen_msg_start_delay_time_def is None:
-            return None
-
-        if message_attributes:
-            gen_msg_start_delay_time_attr = message_attributes.get('GenMsgStartDelayTime')
-            if gen_msg_start_delay_time_attr:
-                return gen_msg_start_delay_time_attr.value or None
-
-        return gen_msg_start_delay_time_def.default_value or None
 
     def get_frame_format(frame_id_dbc):
         """Get frame format for a given message"""
@@ -1775,11 +1699,11 @@ def _load_messages(tokens,
                     name=get_message_name(frame_id_dbc, message[2]),
                     length=int(message[4], 0),
                     senders=senders,
-                    send_type=get_send_type(frame_id_dbc),
-                    type=get_type(frame_id_dbc),
-                    cycle_time=get_cycle_time(frame_id_dbc),
-                    delay_time=get_delay_time(frame_id_dbc),
-                    start_delay_time=get_start_delay_time(frame_id_dbc),
+                    send_type=get_attribute_value(frame_id_dbc, 'GenMsgSendType'),
+                    type=get_attribute_value(frame_id_dbc, 'Type'),
+                    cycle_time=get_attribute_value(frame_id_dbc, 'GenMsgCycleTime'),
+                    delay_time=get_attribute_value(frame_id_dbc, 'GenMsgDelayTime'),
+                    start_delay_time=get_attribute_value(frame_id_dbc, 'GenMsgStartDelayTime'),
                     dbc_specifics=DbcSpecifics(get_attributes(frame_id_dbc),
                                                definitions),
                     signals=signals,

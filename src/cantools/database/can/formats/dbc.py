@@ -1576,6 +1576,32 @@ def _load_messages(tokens,
         except KeyError:
             return None
 
+    def get_type(frame_id_dbc):
+        """Get type for a given message.
+
+        """
+
+        result = None
+        message_attributes = get_attributes(frame_id_dbc)
+
+        if message_attributes is None:
+            return result
+
+        try:
+            result = message_attributes['Type'].value
+
+            # if definitions is enum (otherwise above value is maintained) -> Prevents ValueError
+            if definitions['Type'].choices is not None:
+                # Resolve ENUM index to ENUM text
+                result = definitions['Type'].choices[int(result)]
+        except (KeyError, TypeError):
+            try:
+                result = definitions['Type'].default_value
+            except (KeyError, TypeError):
+                result = None
+
+        return result
+
     def get_send_type(frame_id_dbc):
         """Get send type for a given message.
 
@@ -1717,6 +1743,7 @@ def _load_messages(tokens,
                     length=int(message[4], 0),
                     senders=senders,
                     send_type=get_send_type(frame_id_dbc),
+                    type=get_type(frame_id_dbc),
                     cycle_time=get_cycle_time(frame_id_dbc),
                     dbc_specifics=DbcSpecifics(get_attributes(frame_id_dbc),
                                                definitions),

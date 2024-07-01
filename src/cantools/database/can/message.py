@@ -77,6 +77,7 @@ class Message:
                  comment: Optional[Union[str, Comments]] = None,
                  senders: Optional[List[str]] = None,
                  send_type: Optional[str] = None,
+                 type: Optional[str] = None,
                  cycle_time: Optional[int] = None,
                  dbc_specifics: Optional['DbcSpecifics'] = None,
                  autosar_specifics: Optional['AutosarMessageSpecifics'] = None,
@@ -132,6 +133,7 @@ class Message:
 
         self._senders = senders if senders else []
         self._send_type = send_type
+        self._type = type
         self._cycle_time = cycle_time
         self._dbc = dbc_specifics
         self._autosar = autosar_specifics
@@ -444,6 +446,14 @@ class Message:
         """
 
         return self._send_type
+
+    @property
+    def type(self) -> Optional[str]:
+        """The message type, or ``None`` if unavailable.
+
+        """
+
+        return self._type
 
     @property
     def cycle_time(self) -> Optional[int]:
@@ -1325,4 +1335,7 @@ class Message:
             f'0x{self._frame_id:x}, ' \
             f'{self._is_extended_frame}, '\
             f'{self._length}, ' \
-            f'{self._comments})'
+            f'{self._comments}, ' \
+            f'{self.cycle_time}, ' \
+            f'{self.send_type}, ' \
+            f'{self.type})'

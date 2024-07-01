@@ -1335,7 +1335,4 @@ class Message:
             f'0x{self._frame_id:x}, ' \
             f'{self._is_extended_frame}, '\
             f'{self._length}, ' \
-            f'{self._comments}, ' \
-            f'{self.cycle_time}, ' \
-            f'{self.send_type}, ' \
-            f'{self.type})'
+            f'{self._comments})' \

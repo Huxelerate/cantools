@@ -1642,6 +1642,39 @@ def _load_messages(tokens,
 
         return gen_msg_cycle_time_def.default_value or None
 
+    def get_delay_time(frame_id_dbc):
+        """Get delay time for a given message.
+
+        """
+        message_attributes = get_attributes(frame_id_dbc)
+
+        gen_msg_delay_time_def = definitions.get('GenMsgDelayTime')
+        if gen_msg_delay_time_def is None:
+            return None
+
+        if message_attributes:
+            gen_msg_delay_time_attr = message_attributes.get('GenMsgDelayTime')
+            if gen_msg_delay_time_attr:
+                return gen_msg_delay_time_attr.value or None
+
+        return gen_msg_delay_time_def.default_value or None
+
+    def get_start_delay_time(frame_id_dbc):
+        """Get start delay time for a given message.
+
+        """
+        message_attributes = get_attributes(frame_id_dbc)
+
+        gen_msg_start_delay_time_def = definitions.get('GenMsgStartDelayTime')
+        if gen_msg_start_delay_time_def is None:
+            return None
+
+        if message_attributes:
+            gen_msg_start_delay_time_attr = message_attributes.get('GenMsgStartDelayTime')
+            if gen_msg_start_delay_time_attr:
+                return gen_msg_start_delay_time_attr.value or None
+
+        return gen_msg_start_delay_time_def.default_value or None
 
     def get_frame_format(frame_id_dbc):
         """Get frame format for a given message"""
@@ -1745,6 +1778,8 @@ def _load_messages(tokens,
                     send_type=get_send_type(frame_id_dbc),
                     type=get_type(frame_id_dbc),
                     cycle_time=get_cycle_time(frame_id_dbc),
+                    delay_time=get_delay_time(frame_id_dbc),
+                    start_delay_time=get_start_delay_time(frame_id_dbc),
                     dbc_specifics=DbcSpecifics(get_attributes(frame_id_dbc),
                                                definitions),
                     signals=signals,

@@ -169,6 +169,22 @@ ATTRIBUTE_DEFINITION_GENMSGCYCLETIME = AttributeDefinition(
     minimum=0,
     maximum=2**16-1)
 
+ATTRIBUTE_DEFINITION_GENMSGDELAYTIME = AttributeDefinition(
+    name='GenMsgDelayTime',
+    default_value=0,
+    kind='BO_',
+    type_name='INT',
+    minimum=0,
+    maximum=2**16-1)
+
+ATTRIBUTE_DEFINITION_GENMSGSTARTDELAYTIME = AttributeDefinition(
+    name='GenMsgStartDelayTime',
+    default_value=0,
+    kind='BO_',
+    type_name='INT',
+    minimum=0,
+    maximum=2**16-1)
+
 ATTRIBUTE_DEFINITION_GENSIGSTARTVALUE = AttributeDefinition(
     name='GenSigStartValue',
     default_value=0,
@@ -1577,7 +1593,13 @@ def _load_messages(tokens,
             return None
         
     def get_attribute_value(frame_id_dbc, attribute):
-        """Get the attribute value of a given frame id"""
+        """Get the attribute value of a given frame id. Currently supported attributes:
+           - GenMsgSendType: specifies the whether a message is cyclic or sporadic
+           - Type: It is a further specification w.r.t. to GenMsgSendType that gives more details on whether the message is cyclic, sporadic, mixed, etc.
+           - GenMsgCycleTime: Defines the period of a cyclic message
+           - GenMsgDelayTime: Defines the offset w.r.t. to the cycle time
+           - GenMsgStartDelayTime: Defines the time interval between start-up and the first message
+        """
 
         result = None
         message_attributes = get_attributes(frame_id_dbc)

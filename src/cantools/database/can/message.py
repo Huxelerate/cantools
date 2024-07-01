@@ -453,7 +453,7 @@ class Message:
 
     @property
     def type(self) -> Optional[str]:
-        """The message type, or ``None`` if unavailable.
+        """The message type which indicates whether the message is cyclic, cyclic on change, sporadic, etc. ``None`` if unavailable.
 
         """
 
@@ -461,7 +461,7 @@ class Message:
 
     @property
     def cycle_time(self) -> Optional[int]:
-        """The message cycle time, or ``None`` if unavailable.
+        """The message cycle time in case of a periodic message, or ``None`` if unavailable.
 
         """
 
@@ -469,7 +469,12 @@ class Message:
 
     @property
     def delay_time(self) -> Optional[int]:
-        """The message delay time, or ``None`` if unavailable.
+        """The offset with respect to the message period. E.g.:
+            - period -> 5 ms
+            - delay -> 1 ms
+            - schedule time -> period + delay = 6 ms
+        
+        ``None`` if unavailable.
 
         """
 
@@ -477,7 +482,7 @@ class Message:
 
     @property
     def start_delay_time(self) -> Optional[int]:
-        """The start delay time, or ``None`` if unavailable.
+        """The offset with respect to the start-up and the time that the first message is sent. ``None`` if unavailable.
 
         """
 

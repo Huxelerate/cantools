@@ -185,6 +185,8 @@ ATTRIBUTE_DEFINITION_GENMSGSTARTDELAYTIME = AttributeDefinition(
     minimum=0,
     maximum=2**16-1)
 
+# TODO: Insert also the ATTRIBUTE_DEFINITION_TYPE, for which is not yet clear what the default value is.
+
 ATTRIBUTE_DEFINITION_GENSIGSTARTVALUE = AttributeDefinition(
     name='GenSigStartValue',
     default_value=0,

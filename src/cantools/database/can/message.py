@@ -79,6 +79,7 @@ class Message:
                  send_type: Optional[str] = None,
                  type: Optional[str] = None,
                  cycle_time: Optional[int] = None,
+                 period: Optional[int] = None,
                  delay_time: Optional[int] = None,
                  start_delay_time: Optional[int] = None,
                  dbc_specifics: Optional['DbcSpecifics'] = None,
@@ -137,6 +138,7 @@ class Message:
         self._send_type = send_type
         self._type = type
         self._cycle_time = cycle_time
+        self._period = period
         self._delay_time = delay_time
         self._start_delay_time = start_delay_time
         self._dbc = dbc_specifics
@@ -466,6 +468,14 @@ class Message:
         """
 
         return self._cycle_time
+
+    @property
+    def period(self) -> Optional[int]:
+        """The message period in case of a periodic message, or ``None`` if unavailable.
+
+        """
+
+        return self._period
 
     @property
     def delay_time(self) -> Optional[int]:

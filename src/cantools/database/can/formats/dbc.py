@@ -169,6 +169,14 @@ ATTRIBUTE_DEFINITION_GENMSGCYCLETIME = AttributeDefinition(
     minimum=0,
     maximum=2**16-1)
 
+ATTRIBUTE_DEFINITION_PERIOD = AttributeDefinition(
+    name='Period',
+    default_value=0,
+    kind='BO_',
+    type_name='INT',
+    minimum=0,
+    maximum=2**16-1)
+
 ATTRIBUTE_DEFINITION_GENMSGDELAYTIME = AttributeDefinition(
     name='GenMsgDelayTime',
     default_value=0,
@@ -1721,6 +1729,7 @@ def _load_messages(tokens,
                     send_type=get_attribute_value(frame_id_dbc, 'GenMsgSendType'),
                     type=get_attribute_value(frame_id_dbc, 'Type'),
                     cycle_time=get_attribute_value(frame_id_dbc, 'GenMsgCycleTime'),
+                    period=get_attribute_value(frame_id_dbc, 'Period'),
                     delay_time=get_attribute_value(frame_id_dbc, 'GenMsgDelayTime'),
                     start_delay_time=get_attribute_value(frame_id_dbc, 'GenMsgStartDelayTime'),
                     dbc_specifics=DbcSpecifics(get_attributes(frame_id_dbc),

@@ -1593,12 +1593,7 @@ def _load_messages(tokens,
             return None
         
     def get_attribute_value(frame_id_dbc, attribute):
-        """Get the attribute value of a given frame id. Currently supported attributes:
-           - GenMsgSendType: specifies the whether a message is cyclic or sporadic
-           - Type: It is a further specification w.r.t. to GenMsgSendType that gives more details on whether the message is cyclic, sporadic, mixed, etc.
-           - GenMsgCycleTime: Defines the period of a cyclic message
-           - GenMsgDelayTime: Defines the offset w.r.t. to the cycle time
-           - GenMsgStartDelayTime: Defines the time interval between start-up and the first message
+        """Get the value of an attribute for a given frame id, possibly returning a default value if it exsists and the attribute is not available, without any ad-hoc processing.
         """
 
         result = None

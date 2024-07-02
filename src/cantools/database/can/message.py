@@ -77,7 +77,10 @@ class Message:
                  comment: Optional[Union[str, Comments]] = None,
                  senders: Optional[List[str]] = None,
                  send_type: Optional[str] = None,
+                 type: Optional[str] = None,
                  cycle_time: Optional[int] = None,
+                 delay_time: Optional[int] = None,
+                 start_delay_time: Optional[int] = None,
                  dbc_specifics: Optional['DbcSpecifics'] = None,
                  autosar_specifics: Optional['AutosarMessageSpecifics'] = None,
                  is_extended_frame: bool = False,
@@ -132,7 +135,10 @@ class Message:
 
         self._senders = senders if senders else []
         self._send_type = send_type
+        self._type = type
         self._cycle_time = cycle_time
+        self._delay_time = delay_time
+        self._start_delay_time = start_delay_time
         self._dbc = dbc_specifics
         self._autosar = autosar_specifics
         self._bus_name = bus_name
@@ -446,12 +452,41 @@ class Message:
         return self._send_type
 
     @property
+    def type(self) -> Optional[str]:
+        """The message type which indicates whether the message is cyclic, cyclic on change, sporadic, etc. ``None`` if unavailable.
+
+        """
+
+        return self._type
+
+    @property
     def cycle_time(self) -> Optional[int]:
-        """The message cycle time, or ``None`` if unavailable.
+        """The message cycle time in case of a periodic message, or ``None`` if unavailable.
 
         """
 
         return self._cycle_time
+
+    @property
+    def delay_time(self) -> Optional[int]:
+        """The offset with respect to the message period. E.g.:
+            - period -> 5 ms
+            - delay -> 1 ms
+            - schedule time -> period + delay = 6 ms
+        
+        ``None`` if unavailable.
+
+        """
+
+        return self._delay_time
+
+    @property
+    def start_delay_time(self) -> Optional[int]:
+        """The offset with respect to the start-up and the time that the first message is sent. ``None`` if unavailable.
+
+        """
+
+        return self._start_delay_time
 
     @cycle_time.setter
     def cycle_time(self, value: Optional[int]) -> None:

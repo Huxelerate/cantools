@@ -1305,9 +1305,9 @@ class Message:
         # signals.
         for offset, signal_bit in enumerate(signal_bits):
             if signal_bit is not None:
-                if message_bits[offset] is not None:
+                if message_bits[offset] is not None and self._strict:
                     raise Error(
-                        f'The signals {signal.name} and {message_bits[offset]} are overlapping in message {self.name}.')
+                        f'The signals {signal.name} and {message_bits[offset]} are overlapping in message {self.name}. {self._strict}')
 
                 message_bits[offset] = signal.name
 

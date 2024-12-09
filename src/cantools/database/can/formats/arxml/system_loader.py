@@ -26,10 +26,12 @@ LOGGER = logging.getLogger(__name__)
 class SystemLoader:
     def __init__(self,
                  root:Any,
-                 strict:bool,
+                 strict: bool,
+                 best_effort: bool=False,
                  sort_signals:type_sort_signals=sort_signals_by_start_bit):
         self._root = root
         self._strict = strict
+        self._best_effort = best_effort
         self._sort_signals = sort_signals
 
         m = re.match(r'^\{(.*)\}AUTOSAR$', self._root.tag)
@@ -1214,7 +1216,7 @@ class SystemLoader:
             dynalt_selector_signals = \
                 [ x for x in dynalt_signals if x.start == selector_pos ]
             
-            if len(dynalt_selector_signals) == 0:
+            if len(dynalt_selector_signals) == 0 and self._best_effort:
                 # TODO: check whether this is enforced by the ARXML standard.
                 #       for now, if the dynamic alternative selector signals
                 #       cannot be found, skip this PDU
@@ -1889,7 +1891,7 @@ class SystemLoader:
 
                 # TODO: handle cases where lower limit and upper limits are None
                 #       for the time being we skip the compu scale
-                if lower_limit is None or upper_limit is None:
+                if lower_limit is None or upper_limit is None and self._best_effort:
                     LOGGER.warning(f"Skipping compu scale as it does not have valid upper and lower limits")
                     continue
 

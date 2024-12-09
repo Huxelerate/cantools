@@ -102,6 +102,7 @@ def load_file(filename: StringPathLike,
               frame_id_mask: Optional[int] = None,
               prune_choices: bool = False,
               strict: bool = True,
+              best_effort: bool = False,
               cache_dir: Optional[str] = None,
               sort_signals: utils.type_sort_signals = utils.sort_signals_by_start_bit,
               ) -> Union[can.Database, diagnostics.Database]:
@@ -190,6 +191,7 @@ def load_file(filename: StringPathLike,
                         frame_id_mask,
                         prune_choices,
                         strict,
+                        best_effort,
                         sort_signals)
     else:
         return _load_file_cache(filename,
@@ -258,6 +260,7 @@ def load(fp: TextIO,
          frame_id_mask: Optional[int] = None,
          prune_choices: bool = False,
          strict: bool = True,
+         best_effort: bool = False,
          sort_signals: utils.type_sort_signals = utils.sort_signals_by_start_bit) -> Union[can.Database, diagnostics.Database]:
     """Read and parse given database file-like object and return a
     :class:`can.Database<.can.Database>` or
@@ -284,6 +287,7 @@ def load(fp: TextIO,
                        frame_id_mask,
                        prune_choices,
                        strict,
+                       best_effort,
                        sort_signals)
 
 
@@ -292,6 +296,7 @@ def load_string(string: str,
                 frame_id_mask: Optional[int] = None,
                 prune_choices: bool = False,
                 strict: bool = True,
+                best_effort: bool = False,
                 sort_signals: utils.type_sort_signals = utils.sort_signals_by_start_bit) \
         -> Union[can.Database, diagnostics.Database]:
     """Parse given database string and return a
@@ -341,6 +346,7 @@ def load_string(string: str,
     def load_can_database(fmt: str) -> can.Database:
         db = can.Database(frame_id_mask=frame_id_mask,
                           strict=strict,
+                          best_effort=best_effort,
                           sort_signals=sort_signals)
 
         if fmt == 'arxml':

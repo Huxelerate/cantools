@@ -56,6 +56,7 @@ class Database:
                  autosar_specifics: Optional[AutosarDatabaseSpecifics] = None,
                  frame_id_mask: Optional[int] = None,
                  strict: bool = True,
+                 best_effort: bool = False,
                  sort_signals: type_sort_signals = sort_signals_by_start_bit,
                  ) -> None:
         self._messages = messages or []
@@ -72,6 +73,7 @@ class Database:
 
         self._frame_id_mask = frame_id_mask
         self._strict = strict
+        self._best_effort = best_effort
         self._sort_signals = sort_signals
         self.refresh()
 

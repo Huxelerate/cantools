@@ -1307,7 +1307,7 @@ class Message:
             if signal_bit is not None:
                 if message_bits[offset] is not None:
                     raise Error(
-                        f'The signals {signal.name} and {message_bits[offset]} are overlapping in message {self.name}')
+                        f'The signals {signal.name} and {message_bits[offset]} are overlapping in message {self.name}.')
 
                 message_bits[offset] = signal.name
 

@@ -260,7 +260,7 @@ class Database:
 
         """
 
-        database = arxml.load_string(string, self._strict, sort_signals=self._sort_signals)
+        database = arxml.load_string(string, self._strict, self._best_effort, sort_signals=self._sort_signals)
 
         self._messages += database.messages
         self._nodes = database.nodes

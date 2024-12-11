@@ -26,10 +26,12 @@ LOGGER = logging.getLogger(__name__)
 class SystemLoader:
     def __init__(self,
                  root:Any,
-                 strict:bool,
+                 strict: bool,
+                 best_effort: bool=False,
                  sort_signals:type_sort_signals=sort_signals_by_start_bit):
         self._root = root
         self._strict = strict
+        self._best_effort = best_effort
         self._sort_signals = sort_signals
 
         m = re.match(r'^\{(.*)\}AUTOSAR$', self._root.tag)
@@ -1025,7 +1027,8 @@ class SystemLoader:
                             unused_bit_pattern=unused_bit_pattern,
                             comment=comments,
                             autosar_specifics=contained_autosar_specifics,
-                            sort_signals=self._sort_signals)
+                            sort_signals=self._sort_signals,
+                            strict=self._strict)
 
                 contained_messages.append(contained_message)
 
@@ -1212,6 +1215,14 @@ class SystemLoader:
             # includes it in every dynamic part)
             dynalt_selector_signals = \
                 [ x for x in dynalt_signals if x.start == selector_pos ]
+            
+            if len(dynalt_selector_signals) == 0 and self._best_effort:
+                # TODO: check whether this is enforced by the ARXML standard.
+                #       for now, if the dynamic alternative selector signals
+                #       cannot be found, skip this PDU
+                LOGGER.warning(f"Skipping multiplexed dynamic signal {dynalt_pdu}")
+                continue
+
             assert len(dynalt_selector_signals) == 1
             dselsig = dynalt_selector_signals[0]
             assert dselsig.start == selector_pos
@@ -1877,6 +1888,13 @@ class SystemLoader:
             if vt is not None:
                 # the current scale is an enumeration value
                 lower_limit, upper_limit = self._load_scale_limits(compu_scale)
+
+                # TODO: handle cases where lower limit and upper limits are None
+                #       for the time being we skip the compu scale
+                if (lower_limit is None or upper_limit is None) and self._best_effort:
+                    LOGGER.warning(f"Skipping compu scale as it does not have valid upper and lower limits")
+                    continue
+
                 assert(lower_limit is not None \
                        and lower_limit == upper_limit)
                 value = lower_limit

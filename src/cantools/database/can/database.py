@@ -56,6 +56,7 @@ class Database:
                  autosar_specifics: Optional[AutosarDatabaseSpecifics] = None,
                  frame_id_mask: Optional[int] = None,
                  strict: bool = True,
+                 best_effort: bool = False,
                  sort_signals: type_sort_signals = sort_signals_by_start_bit,
                  ) -> None:
         self._messages = messages or []
@@ -72,6 +73,7 @@ class Database:
 
         self._frame_id_mask = frame_id_mask
         self._strict = strict
+        self._best_effort = best_effort
         self._sort_signals = sort_signals
         self.refresh()
 
@@ -258,7 +260,7 @@ class Database:
 
         """
 
-        database = arxml.load_string(string, self._strict, sort_signals=self._sort_signals)
+        database = arxml.load_string(string, self._strict, self._best_effort, sort_signals=self._sort_signals)
 
         self._messages += database.messages
         self._nodes = database.nodes

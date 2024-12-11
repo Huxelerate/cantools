@@ -39,6 +39,7 @@ def is_ecu_extract(root: Any # For whatever reason, mypy does not
 
 def load_string(string:str,
                 strict:bool=True,
+                best_effort:bool=False,
                 sort_signals:type_sort_signals=sort_signals_by_start_bit) \
             -> InternalDatabase:
     """Parse given ARXML format string.
@@ -70,4 +71,4 @@ def load_string(string:str,
 
         return EcuExtractLoader(root, strict, sort_signals).load()
     else:
-        return SystemLoader(root, strict, sort_signals).load()
+        return SystemLoader(root, strict, best_effort, sort_signals).load()

@@ -90,6 +90,7 @@ def _load_file_cache(filename: StringPathLike,
                                 frame_id_mask,
                                 prune_choices,
                                 strict,
+                                False,
                                 sort_signals)
             cache[key] = database
 
@@ -313,6 +314,9 @@ def load_string(string: str,
 
     See :class:`can.Database<.can.Database>` for a description of
     `strict`.
+
+    `best_effort` is a bool indicating whether to continue the execution upon errors or situations
+    in which the network definition file is not well formatted
 
     `sort_signals` is a function taking a list of signals as argument and returning a list of signals.
     By default signals are sorted by their start bit when their Message object is created.

@@ -1891,7 +1891,7 @@ class SystemLoader:
 
                 # TODO: handle cases where lower limit and upper limits are None
                 #       for the time being we skip the compu scale
-                if lower_limit is None or upper_limit is None and self._best_effort:
+                if (lower_limit is None or upper_limit is None) and self._best_effort:
                     LOGGER.warning(f"Skipping compu scale as it does not have valid upper and lower limits")
                     continue
 

@@ -2258,6 +2258,9 @@ class SystemLoader:
             for base_elem in base_elems:
                 local_result = []
 
+                if base_elem is None:
+                    continue
+
                 for child_elem in base_elem:
                     ctt = f'{{{self.xml_namespace}}}{child_tag_name}'
                     cttr = f'{{{self.xml_namespace}}}{child_tag_name}-REF'
@@ -2271,7 +2274,7 @@ class SystemLoader:
                             dest_tag_name=child_elem.attrib.get('DEST'),
                             refbase_name=child_elem.attrib.get('BASE'))
 
-                        if tmp is None:
+                        if tmp is None and not self._best_effort:
                             raise ValueError(f'Encountered dangling reference '
                                              f'{child_tag_name}-REF of type '
                                              f'"{child_elem.attrib.get("DEST")}": '

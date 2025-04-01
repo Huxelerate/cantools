@@ -200,10 +200,8 @@ class SystemLoader:
 
             # handle locally-specified clusters
             for can_cluster in can_clusters:
-                autosar_specifics = AutosarBusSpecifics()
-
                 if self.autosar_version_newer(4):
-                    name = \
+                    cluster_name = \
                         self._get_unique_arxml_child(can_cluster,
                                                      'SHORT-NAME').text
                     comments = self._load_comments(can_cluster)
@@ -222,6 +220,33 @@ class SystemLoader:
                                        f'cluster "{name}". Using first one.')
 
                     variant = variants[0]
+
+                    # physical channels
+                    # [AUTOSAR TPS SystemTemplate - Table 3.7: PhysicalChannel]
+                    # ...
+                    # Note:  ... Bus systems like CAN and LIN only have exactly one PhysicalChannel.
+                    physical_channels = \
+                        self._get_arxml_children(variant,
+                                                    [
+                                                        'PHYSICAL-CHANNELS',
+                                                        '*&CAN-PHYSICAL-CHANNEL'
+                                                    ])
+                    
+                    if physical_channels is None or len(physical_channels) == 0:
+                        # WTH?
+                        continue
+
+                    elif len(physical_channels) > 1:
+                        LOGGER.warning(f'Multiple physical channels specified for CAN '
+                                        f'cluster "{name}". This is not supported by'
+                                        f' the AUTOSAR specification. The cluster '
+                                        f'will be ignored.')
+                        continue
+                        
+                    physical_channel = physical_channels[0]
+                    name = \
+                        self._get_unique_arxml_child(physical_channel,
+                                                        'SHORT-NAME').text
 
                     # version of the CAN standard
                     proto_version = \
@@ -244,14 +269,41 @@ class SystemLoader:
 
                     buses.append(Bus(name=name,
                                      comment=comments,
-                                     autosar_specifics=autosar_specifics,
+                                     autosar_specifics=AutosarBusSpecifics(cluster_name=cluster_name),
                                      baudrate=baudrate,
                                      fd_baudrate=fd_baudrate))
                 else: # AUTOSAR 3
-                    name = \
+                    cluster_name = \
                         self._get_unique_arxml_child(can_cluster,
                                                      'SHORT-NAME').text
                     comments = self._load_comments(can_cluster)
+
+                    # physical channels
+                    # [AUTOSAR SystemTemplate - Table 2.6: PhysicalChannel]
+                    # ...
+                    # Note:  ... Bus systems like CAN and LIN only have exactly one PhysicalChannel.
+                    physical_channels = \
+                        self._get_arxml_children(can_cluster,
+                                                    [
+                                                        'PHYSICAL-CHANNELS',
+                                                        '*&PHYSICAL-CHANNEL'
+                                                    ])
+                    
+                    if physical_channels is None or len(physical_channels) == 0:
+                        # WTH?
+                        continue
+
+                    elif len(physical_channels) > 1:
+                        LOGGER.warning(f'Multiple physical channels specified for CAN '
+                                        f'cluster "{name}". This is not supported by'
+                                        f' the AUTOSAR specification. The cluster '
+                                        f'will be ignored.')
+                        continue
+                        
+                    physical_channel = physical_channels[0]
+                    name = \
+                        self._get_unique_arxml_child(physical_channel,
+                                                        'SHORT-NAME').text
 
                     # version of the CAN standard
                     proto_version = \
@@ -271,7 +323,7 @@ class SystemLoader:
 
                     buses.append(Bus(name=name,
                                      comment=comments,
-                                     autosar_specifics=autosar_specifics,
+                                     autosar_specifics=AutosarBusSpecifics(cluster_name=cluster_name),
                                      baudrate=baudrate,
                                      fd_baudrate=fd_baudrate))
 

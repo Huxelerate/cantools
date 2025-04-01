@@ -1,12 +1,18 @@
 # A CAN bus.
+from typing import NewType, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cantools.database.can.formats.arxml.bus_specifics import AutosarBusSpecifics
 
 class Bus:
     """A CAN bus.
 
     """
 
+    BusName = NewType('BusName', str)
+
     def __init__(self,
-                 name,
+                 name: str,
                  comment=None,
                  baudrate=None,
                  fd_baudrate=None,
@@ -31,7 +37,7 @@ class Bus:
         self._autosar = autosar_specifics
 
     @property
-    def name(self):
+    def name(self) -> BusName:
         """The bus name as a string.
 
         """
@@ -81,7 +87,7 @@ class Bus:
         return self._fd_baudrate
 
     @property
-    def autosar(self):
+    def autosar(self) -> Optional["AutosarBusSpecifics"]:
         """An object containing AUTOSAR specific properties of the bus.
 
         """

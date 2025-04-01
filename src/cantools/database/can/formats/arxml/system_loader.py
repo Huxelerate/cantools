@@ -3,7 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Any
+from typing import Any, Iterable, List, Mapping, Optional
 
 from ....conversion import BaseConversion, IdentityConversion
 from ....namedsignalvalue import NamedSignalValue
@@ -151,7 +151,7 @@ class SystemLoader:
 
         buses = self._load_buses(root_packages)
         nodes = self._load_nodes(root_packages)
-        messages = self._load_messages(root_packages)
+        messages = self._load_messages(root_packages, buses)
 
         # the senders and receivers can only be loaded once all
         # messages are known...
@@ -180,7 +180,7 @@ class SystemLoader:
                                 version=None,
                                 autosar_specifics=autosar_specifics)
 
-    def _load_buses(self, package_list):
+    def _load_buses(self, package_list) -> List[Bus]:
         """Recursively extract all buses of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -689,7 +689,7 @@ class SystemLoader:
             if sub_package_list is not None:
                 self._load_e2e_properties(sub_package_list, messages)
 
-    def _load_messages(self, package_list):
+    def _load_messages(self, package_list, buses: Iterable[Bus]) -> List[Message]:
         """Recursively extract all messages of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -697,13 +697,20 @@ class SystemLoader:
                 packages and their sub-packages
         """
 
+        buses_by_cluster_name = \
+            {
+                bus.autosar.cluster_name: bus
+                for bus in buses
+                if bus.autosar is not None # Defensive: the bus should always be AUTOSAR-based
+            }
+
         messages = []
 
         # load all messages of all packages in an list of XML package elements
         for package in package_list.iterfind('./ns:AR-PACKAGE',
                                              self._xml_namespaces):
             # deal with the messages of the current package
-            messages.extend(self._load_package_messages(package))
+            messages.extend(self._load_package_messages(package, buses_by_cluster_name))
 
             # load all sub-packages
             if self.autosar_version_newer(4):
@@ -715,11 +722,11 @@ class SystemLoader:
                                                 self._xml_namespaces)
 
             if sub_package_list is not None:
-                messages.extend(self._load_messages(sub_package_list))
+                messages.extend(self._load_messages(sub_package_list, buses))
 
         return messages
 
-    def _load_package_messages(self, package_elem):
+    def _load_package_messages(self, package_elem, buses_by_cluster_name: Mapping[AutosarBusSpecifics.AutosarBusSpecificsClusterName, Bus]) -> List[Message]:
         """This code extracts the information about CAN clusters of an
         individual AR package
         """
@@ -732,8 +739,13 @@ class SystemLoader:
                                                     '*&CAN-CLUSTER',
                                                 ])
         for can_cluster in can_clusters:
-            bus_name = self._get_unique_arxml_child(can_cluster,
+            cluster_name = self._get_unique_arxml_child(can_cluster,
                                                     'SHORT-NAME').text
+            
+            bus_name = bus.name \
+                if (bus := buses_by_cluster_name.get(cluster_name)) is not None \
+                else None
+
             if self.autosar_version_newer(4):
                 frame_triggerings_spec = \
                     [
@@ -769,7 +781,7 @@ class SystemLoader:
 
         return messages
 
-    def _load_message(self, bus_name, can_frame_triggering):
+    def _load_message(self, bus_name: Optional["Bus.BusName"], can_frame_triggering):
         """Load given message and return a message object.
         """
 

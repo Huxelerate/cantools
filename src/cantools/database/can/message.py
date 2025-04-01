@@ -45,6 +45,7 @@ from .signal_group import SignalGroup
 if TYPE_CHECKING:
     from .formats.arxml import AutosarMessageSpecifics
     from .formats.dbc import DbcSpecifics
+    from .bus import Bus
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class Message:
                  autosar_specifics: Optional['AutosarMessageSpecifics'] = None,
                  is_extended_frame: bool = False,
                  is_fd: bool = False,
-                 bus_name: Optional[str] = None,
+                 bus_name: Optional["Bus.BusName"] = None,
                  signal_groups: Optional[List[SignalGroup]] = None,
                  strict: bool = True,
                  protocol: Optional[str] = None,
@@ -529,7 +530,7 @@ class Message:
         self._autosar = value
 
     @property
-    def bus_name(self) -> Optional[str]:
+    def bus_name(self) -> Optional["Bus.BusName"]:
         """The message bus name, or ``None`` if unavailable.
 
         """
@@ -537,7 +538,7 @@ class Message:
         return self._bus_name
 
     @bus_name.setter
-    def bus_name(self, value: Optional[str]) -> None:
+    def bus_name(self, value: Optional["Bus.BusName"]) -> None:
         self._bus_name = value
 
     @property

@@ -2,7 +2,7 @@
 
 import logging
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Optional
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element, SubElement
 
@@ -168,7 +168,7 @@ def _load_multiplex_element(mux, nodes):
     return signals
 
 
-def _load_message_element(message, bus_name, nodes, strict, sort_signals):
+def _load_message_element(message, bus_name: Optional["Bus.BusName"], nodes, strict, sort_signals):
     """Load given message element and return a message object.
 
     """
@@ -485,11 +485,12 @@ def load_string(string:str, strict:bool=True, sort_signals:type_sort_signals=sor
     for bus in root.iterfind('ns:Bus', NAMESPACES):
         bus_name = bus.attrib['name']
         bus_baudrate = int(bus.get('baudrate', 500000))
-        buses.append(Bus(bus_name, baudrate=bus_baudrate))
+        bus_details = Bus(bus_name, baudrate=bus_baudrate)
+        buses.append(bus_details)
 
         for message in bus.iterfind('ns:Message', NAMESPACES):
             messages.append(_load_message_element(message,
-                                                  bus_name,
+                                                  bus_details.name,
                                                   nodes,
                                                   strict,
                                                   sort_signals))

@@ -175,7 +175,7 @@ Guard:
             # check make sure it behaves as expected
             expected_output = """\
 Message2:
-  Bus: Cluster0
+  Bus: Pch0
   Sending ECUs: Dancer
   Frame ID: 0x6 (6)
   Size: 7 bytes
@@ -235,7 +235,7 @@ Message2:
             # check make sure it behaves as expected
             expected_output = """\
 AlarmStatus:
-  Bus: Cluster0
+  Bus: Pch0
   Sending ECUs: Guard
   Frame ID: 0x3e9 (1001)
   Size: 1 bytes
@@ -327,7 +327,7 @@ No message named "IAmAGhost" has been found in input file.
 Message1:
   Comment[EN]: Comment1
   Comment[DE]: Kommentar1
-  Bus: Cluster0
+  Bus: Pch0
   Sending ECUs: DJ
   Frame ID: 0x5 (5)
   Size: 9 bytes
@@ -418,7 +418,7 @@ Message1:
             # check make sure it behaves as expected
             expected_output = """\
 Message3:
-  Bus: Cluster0
+  Bus: Pch0
   Sending ECUs: Dancer
   Frame ID: 0x64 (100)
   Size: 6 bytes
@@ -492,7 +492,7 @@ Message3:
 
             # check make sure it behaves as expected
             expected_output = """\
-Cluster0:
+Pch0:
   Comment[FOR-ALL]: The great CAN cluster
   Baudrate: 500000
   CAN-FD enabled: True

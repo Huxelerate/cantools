@@ -5,6 +5,7 @@ from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from decimal import Decimal
 from typing import List
+import typing
 
 import textparser
 from textparser import (
@@ -1575,7 +1576,7 @@ def _load_messages(tokens,
                    signal_types,
                    signal_multiplexer_values,
                    strict,
-                   bus_name,
+                   bus_name: typing.Optional["Bus.BusName"],
                    signal_groups,
                    sort_signals):
     """Load messages.

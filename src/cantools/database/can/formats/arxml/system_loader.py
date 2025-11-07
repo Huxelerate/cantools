@@ -3,7 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Any, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Set, Tuple
 
 from ....conversion import BaseConversion, IdentityConversion
 from ....namedsignalvalue import NamedSignalValue
@@ -20,6 +20,7 @@ from .message_specifics import AutosarMessageSpecifics
 from .node_specifics import AutosarNodeSpecifics
 from .secoc_properties import AutosarSecOCProperties
 from .utils import parse_number_string
+from .gateway import Gateway
 
 LOGGER = logging.getLogger(__name__)
 
@@ -151,7 +152,10 @@ class SystemLoader:
 
         buses = self._load_buses(root_packages)
         nodes = self._load_nodes(root_packages)
-        messages = self._load_messages(root_packages, buses)
+        gateways = self._load_gateways(root_packages)
+        pdu_triggering_routes = Gateway.get_pdu_triggering_routes(gateways)
+
+        messages = self._load_messages(root_packages, buses, pdu_triggering_routes)
 
         # the senders and receivers can only be loaded once all
         # messages are known...
@@ -643,6 +647,46 @@ class SystemLoader:
 
 
         return nodes
+    
+    def _load_gateways(self, package_list) -> List[Gateway]:
+        """Recursively extract all pdu routes (I-PDU-MAPPINGS of GATEWAY in AUTOSAR-speak)
+
+        @return The list of all nodes contained in the given list of
+                packages and their sub-packages
+        """
+        # TODO: check if Autosar 3 also supports gateways
+        if not self.autosar_version_newer(4):
+            return []
+
+        gateways = []
+
+        for package in package_list:
+            for gateway in self._get_arxml_children(package, ["ELEMENTS", "*GATEWAY"]):
+                name = self._get_unique_arxml_child(gateway, "SHORT-NAME").text
+                node_ref = self._get_unique_arxml_child(gateway, "ECU-REF").text
+                pdu_mappings = self._get_arxml_children(gateway, ["I-PDU-MAPPINGS", "*I-PDU-MAPPING"])
+                pdu_triggering_routes: List[Tuple[str, str]] = []
+
+                for pdu_mapping in pdu_mappings:
+                    source = self._get_unique_arxml_child(pdu_mapping, "SOURCE-I-PDU-REF")
+                    target = self._get_unique_arxml_child(pdu_mapping, ["TARGET-I-PDU", "TARGET-I-PDU-REF"])
+                    if source is not None and target is not None:
+                        if source.text and target.text:
+                            pdu_triggering_routes.append((source.text, target.text))
+                
+                gateways.append(Gateway(
+                    name = name, 
+                    node_ref = node_ref,
+                    pdu_triggering_routes = pdu_triggering_routes
+                ))
+
+            # handle all sub-packages
+            sub_package_list = package.find('./ns:AR-PACKAGES', self._xml_namespaces)
+
+            if sub_package_list is not None:
+                gateways.extend(self._load_gateways(sub_package_list))
+
+        return gateways
 
     def _load_e2e_properties(self, package_list, messages):
         """Internalize AUTOSAR end-to-end protection properties required for
@@ -724,7 +768,7 @@ class SystemLoader:
             if sub_package_list is not None:
                 self._load_e2e_properties(sub_package_list, messages)
 
-    def _load_messages(self, package_list, buses: Iterable[Bus]) -> List[Message]:
+    def _load_messages(self, package_list, buses: Iterable[Bus], pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> List[Message]:
         """Recursively extract all messages of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -745,7 +789,7 @@ class SystemLoader:
         for package in package_list.iterfind('./ns:AR-PACKAGE',
                                              self._xml_namespaces):
             # deal with the messages of the current package
-            messages.extend(self._load_package_messages(package, buses_by_cluster_name))
+            messages.extend(self._load_package_messages(package, buses_by_cluster_name, pdu_triggering_routes))
 
             # load all sub-packages
             if self.autosar_version_newer(4):
@@ -757,11 +801,14 @@ class SystemLoader:
                                                 self._xml_namespaces)
 
             if sub_package_list is not None:
-                messages.extend(self._load_messages(sub_package_list, buses))
+                messages.extend(self._load_messages(sub_package_list, buses, pdu_triggering_routes))
 
         return messages
 
-    def _load_package_messages(self, package_elem, buses_by_cluster_name: Mapping[AutosarBusSpecifics.AutosarBusSpecificsClusterName, Bus]) -> List[Message]:
+    def _load_package_messages(self, 
+                               package_elem, 
+                               buses_by_cluster_name: Mapping[AutosarBusSpecifics.AutosarBusSpecificsClusterName, Bus], 
+                               pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> List[Message]:
         """This code extracts the information about CAN clusters of an
         individual AR package
         """
@@ -812,17 +859,21 @@ class SystemLoader:
 
             for can_frame_triggering in can_frame_triggerings:
                 messages.append(self._load_message(bus_name,
-                                                   can_frame_triggering))
+                                                   can_frame_triggering, 
+                                                   pdu_triggering_routes))
 
         return messages
 
-    def _load_message(self, bus_name: Optional["Bus.BusName"], can_frame_triggering):
+    def _load_message(self, 
+                      bus_name: Optional["Bus.BusName"], 
+                      can_frame_triggering, 
+                      pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]):
         """Load given message and return a message object.
         """
 
         # Default values.
         cycle_time = None
-        senders, receivers = self._get_can_frame_senders_and_receivers(can_frame_triggering)
+        senders, receivers = self._get_can_frame_senders_and_receivers(can_frame_triggering, pdu_triggering_routes)
         autosar_specifics = AutosarMessageSpecifics()
 
         can_frame = self._get_can_frame(can_frame_triggering)
@@ -2418,7 +2469,28 @@ class SystemLoader:
     def _get_can_frame(self, can_frame_triggering):
         return self._get_unique_arxml_child(can_frame_triggering, '&FRAME')
 
-    def _get_can_frame_senders_and_receivers(self, can_frame_triggering) -> Tuple[List[str], List[str]]:
+    def _get_pdu_triggering_ecus(self, pdu_triggering, direction: Literal["in", "out"]) -> Set[str]:
+        pdu_ports = self._get_arxml_children(pdu_triggering, ["I-PDU-PORT-REFS", "*&I-PDU-PORT"])
+        ecu_names: Set[str] = set()
+        for pdu_port in pdu_ports:
+            port_direction = self._get_unique_arxml_child(pdu_port, "COMMUNICATION-DIRECTION").text.lower()
+            if port_direction.lower() != direction:
+                continue
+
+            frame_port_ref = self._node_to_arxml_path[pdu_port]
+            # NOTE: the relationship is: ECU_INSTANCE -> CONNECTORS -> PDU-PORT
+            # here we recover the reference to the ecu by removing the last 2 elements of the path
+            ecu_instance_ref = frame_port_ref.rsplit("/", 2)[0]
+            ecu_instance = self._arxml_path_to_node.get(ecu_instance_ref)
+            if ecu_instance is None:
+                continue
+                        
+            ecu_name = self._get_unique_arxml_child(ecu_instance, "SHORT-NAME").text
+            ecu_names.add(ecu_name)
+
+        return ecu_names
+
+    def _get_can_frame_senders_and_receivers(self, can_frame_triggering, pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> Tuple[List[str], List[str]]:
 
         # TODO: check if can adapt this approach also for Autosar 3
         if not self.autosar_version_newer(4):
@@ -2431,29 +2503,23 @@ class SystemLoader:
         if not pdu_triggerings:
             return []
 
-        senders = set()
-        receivers = set()
+        senders: Set[str] = set()
+        receivers: Set[str] = set()
         for pdu_triggering in pdu_triggerings:
-            pdu_ports = self._get_arxml_children(pdu_triggering, ["I-PDU-PORT-REFS", "*&I-PDU-PORT"])
-            for pdu_port in pdu_ports:
-                direction = self._get_unique_arxml_child(pdu_port, "COMMUNICATION-DIRECTION").text
-                
-                # TODO: check if this is sent via a gateway
-                frame_port_ref = self._node_to_arxml_path[pdu_port]
-                # NOTE: the relationship is: ECU_INSTANCE -> CONNECTORS -> PDU-PORT
-                # here we recover the reference to the ecu by removing the last 2 elements of the path
-                ecu_instance_ref = frame_port_ref.rsplit("/", 2)[0]
-                ecu_instance = self._arxml_path_to_node.get(ecu_instance_ref)
-                if ecu_instance is None:
-                    continue
+            receivers.update(self._get_pdu_triggering_ecus(pdu_triggering,  "in"))
 
-                ecu_name = self._get_unique_arxml_child(ecu_instance, "SHORT-NAME").text
+            pdu_triggering_ref = self._node_to_arxml_path[pdu_triggering]
+            sender_pdu_triggering_ref, gateways = pdu_triggering_routes.get(pdu_triggering_ref, (pdu_triggering_ref, []))
+            sender_pdu_triggering = self._arxml_path_to_node[sender_pdu_triggering_ref]
 
-                if direction.lower() == "out":
-                    senders.add(ecu_name)
-                elif direction.lower() == "in":
-                    receivers.add(ecu_name)
-        
+            if len(gateways) > 0:
+                sender_info = " (routed from: " + ",".join(gateways) + ")"
+            else:
+                sender_info = ""
+
+            for sender in self._get_pdu_triggering_ecus(sender_pdu_triggering, "out"):
+                senders.add(f"{sender}{sender_info}")
+
         return sorted(list(senders)), sorted(list(receivers))
 
     def _get_i_signal(self, i_signal_to_i_pdu_mapping):

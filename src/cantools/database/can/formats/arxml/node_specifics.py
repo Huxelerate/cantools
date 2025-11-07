@@ -4,5 +4,9 @@ class AutosarNodeSpecifics:
 
     AUTOSAR calls such nodes "ECU instances"...
     """
-    def __init__(self):
-        pass
+    def __init__(self, ref: str):
+        self._ref = ref
+    
+    @property
+    def ref(self) -> str:
+        return self._ref

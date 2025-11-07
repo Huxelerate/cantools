@@ -3,7 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Any, Iterable, List, Mapping, Optional
+from typing import Any, Iterable, List, Mapping, Optional, Tuple
 
 from ....conversion import BaseConversion, IdentityConversion
 from ....namedsignalvalue import NamedSignalValue
@@ -13,7 +13,7 @@ from ...internal_database import InternalDatabase
 from ...message import Message
 from ...node import Node
 from ...signal import Signal
-from .bus_specifics import AutosarBusSpecifics
+from .bus_specifics import AutosarBusSpecifics, AutosarCommConnector
 from .database_specifics import AutosarDatabaseSpecifics
 from .end_to_end_properties import AutosarEnd2EndProperties
 from .message_specifics import AutosarMessageSpecifics
@@ -155,6 +155,8 @@ class SystemLoader:
 
         # the senders and receivers can only be loaded once all
         # messages are known...
+        # NOTE: part of the senders/receivers parsing logic for Autosar 4
+        # has been moved directly during message loading
         self._load_senders_and_receivers(root_packages, messages)
 
         # although there must only be one system globally, it can be
@@ -247,6 +249,25 @@ class SystemLoader:
                     name = \
                         self._get_unique_arxml_child(physical_channel,
                                                         'SHORT-NAME').text
+                    
+                    # communication connectors
+                    autosar_comm_connectors: List[AutosarCommConnector] = []
+                    comm_connectors = self._get_unique_arxml_child(physical_channel, 'COMM-CONNECTORS')
+                    for comm_connector in comm_connectors:
+                        if comm_connector.tag != f'{{{self.xml_namespace}}}COMMUNICATION-CONNECTOR-REF-CONDITIONAL':
+                            continue
+
+                        comm_connector_ref = self._get_unique_arxml_child(comm_connector, 'COMMUNICATION-CONNECTOR-REF').text
+                        comm_connector = self._arxml_path_to_node[comm_connector_ref]
+
+                        comm_connector_name = self._get_unique_arxml_child(comm_connector, 'SHORT-NAME').text
+                        node_ref = comm_connector_ref.rsplit("/", 1)[0]
+
+                        autosar_comm_connectors.append(AutosarCommConnector(
+                            name = comm_connector_name,
+                            ref = comm_connector_ref,
+                            node_ref = node_ref
+                        ))
 
                     # version of the CAN standard
                     proto_version = \
@@ -266,10 +287,15 @@ class SystemLoader:
                         self._get_unique_arxml_child(variant, 'CAN-FD-BAUDRATE')
                     if fd_baudrate is not None:
                         fd_baudrate = parse_number_string(fd_baudrate.text)
+                    
+                    autosar_bus_specifics = AutosarBusSpecifics(
+                        cluster_name=cluster_name, 
+                        comm_connectors=autosar_comm_connectors
+                    )
 
                     buses.append(Bus(name=name,
                                      comment=comments,
-                                     autosar_specifics=AutosarBusSpecifics(cluster_name=cluster_name),
+                                     autosar_specifics=autosar_bus_specifics,
                                      baudrate=baudrate,
                                      fd_baudrate=fd_baudrate))
                 else: # AUTOSAR 3
@@ -390,6 +416,15 @@ class SystemLoader:
         return pdu_messages
 
     def _load_senders_receivers_of_ecu(self, ecu_instance, messages):
+
+        if self.autosar_version_newer(4):
+            # DEPRECATED: for Autosar 4 senders and receivers are read via
+            # _get_can_frame_senders_and_receivers which does not require
+            # the presence of ASSOCIATED-COM-I-PDU-GROUP
+            # TODO: check if we can extend _get_can_frame_senders_and_receivers to
+            # autosar 3 and dismiss this method entirely
+            return
+
         # get the name of the ECU. Note that in cantools, ECUs
         # are called 'nodes' for all intents and purposes...
         ecu_name = \
@@ -588,7 +623,7 @@ class SystemLoader:
                                                 ]):
                 name = self._get_unique_arxml_child(ecu, "SHORT-NAME").text
                 comments = self._load_comments(ecu)
-                autosar_specifics = AutosarNodeSpecifics()
+                autosar_specifics = AutosarNodeSpecifics(self._node_to_arxml_path[ecu])
 
                 nodes.append(Node(name=name,
                                   comment=comments,
@@ -787,7 +822,7 @@ class SystemLoader:
 
         # Default values.
         cycle_time = None
-        senders = []
+        senders, receivers = self._get_can_frame_senders_and_receivers(can_frame_triggering)
         autosar_specifics = AutosarMessageSpecifics()
 
         can_frame = self._get_can_frame(can_frame_triggering)
@@ -827,7 +862,7 @@ class SystemLoader:
                            is_fd=is_fd,
                            name=name,
                            length=length,
-                           senders=[],
+                           senders=senders,
                            send_type=None,
                            cycle_time=None,
                            signals=[],
@@ -870,6 +905,10 @@ class SystemLoader:
         unused_bit_pattern = \
             0xff if unused_bit_pattern is None \
             else parse_number_string(unused_bit_pattern.text)
+        
+        # specify receivers
+        for signal in signals:
+            signal.receivers = receivers
 
         return Message(bus_name=bus_name,
                        frame_id=frame_id,
@@ -2378,6 +2417,44 @@ class SystemLoader:
 
     def _get_can_frame(self, can_frame_triggering):
         return self._get_unique_arxml_child(can_frame_triggering, '&FRAME')
+
+    def _get_can_frame_senders_and_receivers(self, can_frame_triggering) -> Tuple[List[str], List[str]]:
+
+        # TODO: check if can adapt this approach also for Autosar 3
+        if not self.autosar_version_newer(4):
+            return []
+
+        # NOTE: usually a single PDU-TRIGGERING is exepcted for a CAN-FRAME-TRIGGERING
+        # but frames referring a MULTIPLEXED-I-PDU (i.e. frames that can data format depending a static mux field)#
+        # can refer multiple PDU-TRIGGERING one for each group of signals (mux signal, static signals, dynamic signals1, dynamic signals2, ....)
+        pdu_triggerings = self._get_arxml_children(can_frame_triggering, ["PDU-TRIGGERINGS", "*PDU-TRIGGERING-REF-CONDITIONAL", "&PDU-TRIGGERING"])
+        if not pdu_triggerings:
+            return []
+
+        senders = set()
+        receivers = set()
+        for pdu_triggering in pdu_triggerings:
+            pdu_ports = self._get_arxml_children(pdu_triggering, ["I-PDU-PORT-REFS", "*&I-PDU-PORT"])
+            for pdu_port in pdu_ports:
+                direction = self._get_unique_arxml_child(pdu_port, "COMMUNICATION-DIRECTION").text
+                
+                # TODO: check if this is sent via a gateway
+                frame_port_ref = self._node_to_arxml_path[pdu_port]
+                # NOTE: the relationship is: ECU_INSTANCE -> CONNECTORS -> PDU-PORT
+                # here we recover the reference to the ecu by removing the last 2 elements of the path
+                ecu_instance_ref = frame_port_ref.rsplit("/", 2)[0]
+                ecu_instance = self._arxml_path_to_node.get(ecu_instance_ref)
+                if ecu_instance is None:
+                    continue
+
+                ecu_name = self._get_unique_arxml_child(ecu_instance, "SHORT-NAME").text
+
+                if direction.lower() == "out":
+                    senders.add(ecu_name)
+                elif direction.lower() == "in":
+                    receivers.add(ecu_name)
+        
+        return sorted(list(senders)), sorted(list(receivers))
 
     def _get_i_signal(self, i_signal_to_i_pdu_mapping):
         if self.autosar_version_newer(4):

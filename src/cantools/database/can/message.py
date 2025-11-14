@@ -87,6 +87,7 @@ class Message:
                  autosar_specifics: Optional['AutosarMessageSpecifics'] = None,
                  is_extended_frame: bool = False,
                  is_fd: bool = False,
+                 is_event_driven: bool = False,
                  bus_name: Optional["Bus.BusName"] = None,
                  signal_groups: Optional[List[SignalGroup]] = None,
                  strict: bool = True,
@@ -110,6 +111,7 @@ class Message:
         self._header_byte_order = header_byte_order
         self._is_extended_frame = is_extended_frame
         self._is_fd = is_fd
+        self._is_event_driven = is_event_driven
         self._name = name
         self._length = length
         self._unused_bit_pattern = unused_bit_pattern
@@ -298,6 +300,18 @@ class Message:
     @is_fd.setter
     def is_fd(self, value):
         self._is_fd = value
+    
+    @property
+    def is_event_driven(self):
+        """``True`` if the message is event driven ``False`` otherwise.
+
+        """
+
+        return self._is_event_driven
+
+    @is_event_driven.setter
+    def is_event_driven(self, value: bool):
+        self._is_event_driven = value
 
     @property
     def name(self) -> str:

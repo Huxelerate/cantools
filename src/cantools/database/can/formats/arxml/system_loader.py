@@ -873,6 +873,7 @@ class SystemLoader:
 
         # Default values.
         cycle_time = None
+        delay_time = None
         senders, receivers = self._get_can_frame_senders_and_receivers(can_frame_triggering, pdu_triggering_routes)
         autosar_specifics = AutosarMessageSpecifics()
 
@@ -916,6 +917,7 @@ class SystemLoader:
                            senders=senders,
                            send_type=None,
                            cycle_time=None,
+                           delay_time=None,
                            signals=[],
                            contained_messages=None,
                            unused_bit_pattern=0xff,
@@ -932,6 +934,7 @@ class SystemLoader:
             signals, \
             cycle_time, \
             child_pdu_paths, \
+            delay_time, \
             contained_messages = \
                 self._load_pdu(pdu, name, 1)
         autosar_specifics._pdu_paths.extend(child_pdu_paths)
@@ -970,6 +973,7 @@ class SystemLoader:
                        senders=senders,
                        send_type=None,
                        cycle_time=cycle_time,
+                       delay_time=delay_time,
                        signals=signals,
                        contained_messages=contained_messages,
                        unused_bit_pattern=unused_bit_pattern,
@@ -1094,6 +1098,7 @@ class SystemLoader:
                     [], \
                     None, \
                     [], \
+                    None, \
                     None
 
             contained_pdus = \
@@ -1138,6 +1143,7 @@ class SystemLoader:
                     signals, \
                     cycle_time, \
                     contained_pdu_paths, \
+                    delay_time, \
                     contained_inner_messages = \
                         self._load_pdu(contained_pdu,
                                        frame_name,
@@ -1177,6 +1183,7 @@ class SystemLoader:
                             name=name,
                             length=length,
                             cycle_time=cycle_time,
+                            delay_time=delay_time,
                             signals=signals,
                             unused_bit_pattern=unused_bit_pattern,
                             comment=comments,
@@ -1191,6 +1198,7 @@ class SystemLoader:
                 [], \
                 None, \
                 child_pdu_paths, \
+                None, \
                 contained_messages
 
         elif is_secured:
@@ -1207,6 +1215,7 @@ class SystemLoader:
                 signals, \
                 cycle_time, \
                 child_pdu_paths, \
+                delay_time, \
                 contained_messages = \
                     self._load_pdu(payload_pdu, frame_name, next_selector_idx)
 
@@ -1218,6 +1227,7 @@ class SystemLoader:
                 signals, \
                 cycle_time, \
                 child_pdu_paths, \
+                delay_time, \
                 contained_messages
 
         # load all data associated with this PDU.
@@ -1252,13 +1262,32 @@ class SystemLoader:
         cycle_time = None
         if time_period is not None:
             cycle_time = int(float(time_period.text) * 1000)
+        
+        if self.autosar_version_newer(4):
+            time_offset_location = [
+                'I-PDU-TIMING-SPECIFICATIONS',
+                'I-PDU-TIMING',
+                'TRANSMISSION-MODE-DECLARATION',
+                'TRANSMISSION-MODE-TRUE-TIMING',
+                'CYCLIC-TIMING',
+                'TIME-OFFSET',
+                'VALUE',
+            ]
+            time_offset = self._get_unique_arxml_child(pdu, time_offset_location)
+        else:
+            # TODO: check if there is a corresponding location for Autosar 3
+            time_offset = None
+        
+        delay_time = None
+        if time_offset is not None:
+            delay_time = int(float(time_offset.text) * 1000)
 
         # ordinary non-multiplexed message
         signals = self._load_pdu_signals(pdu)
 
         if is_multiplexed:
             # multiplexed signals
-            pdu_signals, cycle_time, child_pdu_paths = \
+            pdu_signals, cycle_time, delay_time, child_pdu_paths = \
                 self._load_multiplexed_pdu(pdu, frame_name, next_selector_idx)
             signals.extend(pdu_signals)
 
@@ -1268,6 +1297,7 @@ class SystemLoader:
             signals, \
             cycle_time, \
             child_pdu_paths, \
+            delay_time, \
             None
 
     def _load_multiplexed_pdu(self, pdu, frame_name, next_selector_idx):
@@ -1323,6 +1353,10 @@ class SystemLoader:
         # the cycle time of the message
         cycle_time = None
 
+        # the delay time of the message
+        delay_time = None
+        all_same_delay = True
+
         for dynalt in self._get_arxml_children(pdu, dynpart_spec):
             dynalt_selector_value = \
                 self._get_unique_arxml_child(dynalt, 'SELECTOR-FIELD-CODE')
@@ -1340,6 +1374,7 @@ class SystemLoader:
                 dynalt_signals, \
                 dynalt_cycle_time, \
                 dynalt_child_pdu_paths, \
+                dynalt_delay_time, \
                 _ \
                 = self._load_pdu(dynalt_pdu, frame_name, next_selector_idx)
             child_pdu_paths.extend(dynalt_child_pdu_paths)
@@ -1353,6 +1388,17 @@ class SystemLoader:
                     cycle_time = min(cycle_time, dynalt_cycle_time)
                 else:
                     cycle_time = dynalt_cycle_time
+            
+            # cantools does not a concept for the cycle time of
+            # individual PDUs, but only one for whole messages. 
+            # we set a delay time only if all the PDUs have the same
+            # delay time
+            if dynalt_delay_time is None:
+                all_same_delay = False
+            if delay_time is not None and delay_time != dynalt_cycle_time:
+                all_same_delay = False
+            
+            delay_time = dynalt_delay_time if all_same_delay else None
 
             is_initial = \
                 self._get_unique_arxml_child(dynalt, 'INITIAL-DYNAMIC-PART')
@@ -1461,7 +1507,7 @@ class SystemLoader:
             child_pdu_paths.extend(static_child_pdu_paths)
             signals.extend(static_signals)
 
-        return signals, cycle_time, child_pdu_paths
+        return signals, cycle_time, delay_time, child_pdu_paths
 
     def _load_pdu_signals(self, pdu):
         signals = []

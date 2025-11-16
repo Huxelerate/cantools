@@ -1326,8 +1326,9 @@ class SystemLoader:
             is_event_driven, \
             None
 
-    def _load_multiplexed_pdu(self, pdu, frame_name, next_selector_idx):
-        child_pdu_paths = []
+    def _load_multiplexed_pdu(self, pdu: Element, frame_name: str, next_selector_idx: int) \
+        -> Tuple[List[Signal], Optional[int], Optional[int], bool, List[str]]:
+        child_pdu_paths: List[str] = []
 
         selector_pos = \
             self._get_unique_arxml_child(pdu, 'SELECTOR-FIELD-START-POSITION')
@@ -1384,12 +1385,20 @@ class SystemLoader:
         all_same_delay = True
 
         # whether the message is event driven
-        is_event_driven = None
+        is_event_driven = False
 
         for dynalt in self._get_arxml_children(pdu, dynpart_spec):
-            dynalt_selector_value = \
+            dynalt_selector_value_child = \
                 self._get_unique_arxml_child(dynalt, 'SELECTOR-FIELD-CODE')
-            dynalt_selector_value = parse_number_string(dynalt_selector_value.text)
+            
+            if dynalt_selector_value_child is None and self._best_effort:
+                # TODO: This should be enforced by the ARXML standard.
+                #       For now, if the selector field code is missing
+                #       we skip the dynamic alternative
+                LOGGER.warning(f"Skipping dynamic alternative {dynalt} of multiplexed PDU since SELECTOR-FIELD-CODE is missing")
+                continue
+
+            dynalt_selector_value = parse_number_string(dynalt_selector_value_child.text)
             dynalt_pdu = self._get_unique_arxml_child(dynalt, '&I-PDU')
             dynalt_pdu_ref = self._get_unique_arxml_child(dynalt, 'I-PDU-REF')
             dynalt_pdu_ref = \
@@ -1538,6 +1547,7 @@ class SystemLoader:
                 static_signals, \
                 _, \
                 static_child_pdu_paths, \
+                _, \
                 _, \
                 _, \
                 = self._load_pdu(static_pdu, frame_name, next_selector_idx)

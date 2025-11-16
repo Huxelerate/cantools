@@ -187,7 +187,7 @@ class SystemLoader:
                                 version=None,
                                 autosar_specifics=autosar_specifics)
 
-    def _load_buses(self, package_list) -> List[Bus]:
+    def _load_buses(self, package_list: Element) -> List[Bus]:
         """Recursively extract all buses of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -610,7 +610,7 @@ class SystemLoader:
                 if message.is_container:
                     message.header_byte_order = container_header_byte_order
 
-    def _load_nodes(self, package_list):
+    def _load_nodes(self, package_list: Element) -> List[Node]:
         """Recursively extract all nodes (ECU-instances in AUTOSAR-speak) of
         all CAN clusters of a list of AUTOSAR packages.
 
@@ -618,7 +618,7 @@ class SystemLoader:
                 packages and their sub-packages
         """
 
-        nodes = []
+        nodes: List[Node] = []
 
         for package in package_list:
             for ecu in self._get_arxml_children(package,
@@ -649,17 +649,18 @@ class SystemLoader:
 
         return nodes
     
-    def _load_gateways(self, package_list) -> List[Gateway]:
-        """Recursively extract all pdu routes (I-PDU-MAPPINGS of GATEWAY in AUTOSAR-speak)
+    def _load_gateways(self, package_list: Union[Element, List[Element]]) -> List[Gateway]:
+        """Recursively extract all gateways of
+        all CAN clusters of a list of AUTOSAR packages.
 
-        @return The list of all nodes contained in the given list of
+        @return The list of all gateways nodes contained in the given list of
                 packages and their sub-packages
         """
         # TODO: check if Autosar 3 also supports gateways
         if not self.autosar_version_newer(4):
             return []
 
-        gateways = []
+        gateways: List[Gateway] = []
 
         for package in package_list:
             for gateway in self._get_arxml_children(package, ["ELEMENTS", "*GATEWAY"]):
@@ -2563,7 +2564,10 @@ class SystemLoader:
     def _get_can_frame(self, can_frame_triggering: Element):
         return self._get_unique_arxml_child(can_frame_triggering, '&FRAME')
 
-    def _get_pdu_triggering_ecus(self, pdu_triggering, direction: Literal["in", "out"]) -> Set[str]:
+    def _get_pdu_triggering_ecus(self, pdu_triggering: Element, direction: Literal["in", "out"]) -> Set[str]:
+        """Return the ECU names that are sending (direction=out) or receiving (direction=in) 
+        a PDU-TRIGGERING
+        """
         pdu_ports = self._get_arxml_children(pdu_triggering, ["I-PDU-PORT-REFS", "*&I-PDU-PORT"])
         ecu_names: Set[str] = set()
         for pdu_port in pdu_ports:
@@ -2584,7 +2588,14 @@ class SystemLoader:
 
         return ecu_names
 
-    def _get_can_frame_senders_and_receivers(self, can_frame_triggering, pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> Tuple[List[str], List[str]]:
+    def _get_can_frame_senders_and_receivers(self, can_frame_triggering: Element, pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> Tuple[List[str], List[str]]:
+        """Returns the list of senders and receivers for a given CAN-FRAME-TRIGGERING
+        
+        A sender is the actual ECU producing the frame, 
+        with optional gateways to reach the bus shown in parantheses.
+        The receiver is the ECU receiving the frame, 
+        regardless if the ECU is a direct consumer or routes the message via a gateway.
+        """
 
         # TODO: check if can adapt this approach also for Autosar 3
         if not self.autosar_version_newer(4):

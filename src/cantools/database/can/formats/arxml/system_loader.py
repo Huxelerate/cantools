@@ -258,14 +258,24 @@ class SystemLoader:
                     # communication connectors
                     autosar_comm_connectors: List[AutosarCommConnector] = []
                     comm_connectors = self._get_unique_arxml_child(physical_channel, 'COMM-CONNECTORS')
-                    for comm_connector in comm_connectors:
+                    for comm_connector in comm_connectors or []:
                         if comm_connector.tag != f'{{{self.xml_namespace}}}COMMUNICATION-CONNECTOR-REF-CONDITIONAL':
                             continue
 
-                        comm_connector_ref = self._get_unique_arxml_child(comm_connector, 'COMMUNICATION-CONNECTOR-REF').text
-                        comm_connector = self._arxml_path_to_node[comm_connector_ref]
+                        comm_connector_ref_elem = self._get_unique_arxml_child(comm_connector, 'COMMUNICATION-CONNECTOR-REF')
+                        if comm_connector_ref_elem is None or comm_connector_ref_elem.text is None:
+                            continue
 
-                        comm_connector_name = self._get_unique_arxml_child(comm_connector, 'SHORT-NAME').text
+                        comm_connector_ref = comm_connector_ref_elem.text
+                        comm_connector = self._arxml_path_to_node.get(comm_connector_ref)
+                        if comm_connector is None:
+                            continue
+
+                        comm_connector_name_elem = self._get_unique_arxml_child(comm_connector, 'SHORT-NAME')
+                        if comm_connector_name_elem is None or comm_connector_name_elem.text is None:
+                            continue
+
+                        comm_connector_name = comm_connector_name_elem.text
                         node_ref = comm_connector_ref.rsplit("/", 1)[0]
 
                         autosar_comm_connectors.append(AutosarCommConnector(
@@ -626,11 +636,20 @@ class SystemLoader:
                                                     'ELEMENTS',
                                                     '*ECU-INSTANCE',
                                                 ]):
-                name = self._get_unique_arxml_child(ecu, "SHORT-NAME").text
-                comments = self._load_comments(ecu)
-                autosar_specifics = AutosarNodeSpecifics(self._node_to_arxml_path[ecu])
+                name_elem = self._get_unique_arxml_child(ecu, "SHORT-NAME")
+                if name_elem is None or name_elem.text is None:
+                    # skip ECUs with no name
+                    continue
 
-                nodes.append(Node(name=name,
+                ecu_ref = self._node_to_arxml_path.get(ecu)
+                if ecu_ref is None:
+                    # skip ECUs with no ref
+                    continue
+
+                comments = self._load_comments(ecu)
+                autosar_specifics = AutosarNodeSpecifics(ecu_ref)
+
+                nodes.append(Node(name=name_elem.text,
                                   comment=comments,
                                   autosar_specifics=autosar_specifics))
 
@@ -1419,7 +1438,7 @@ class SystemLoader:
                 = self._load_pdu(dynalt_pdu, frame_name, next_selector_idx)
             child_pdu_paths.extend(dynalt_child_pdu_paths)
 
-            # cantools does not a concept for the cycle time of
+            # cantools does not have a concept of cycle time of
             # individual PDUs, but only one for whole messages. We
             # thus use the minimum cycle time of any dynamic part
             # alternative as the cycle time of the multiplexed message
@@ -1429,9 +1448,9 @@ class SystemLoader:
                 else:
                     cycle_time = dynalt_cycle_time
             
-            # cantools does not a concept for the cycle time of
+            # cantools does not have a concept of delay time of
             # individual PDUs, but only one for whole messages. 
-            # we set a delay time only if all the PDUs have the same
+            # We set a delay time only if all the PDUs have the same
             # delay time
             if dynalt_delay_time is None:
                 all_same_delay = False
@@ -1442,7 +1461,7 @@ class SystemLoader:
 
             # cantools does not have a concept of event driven of
             # individual PDUs, but only one for whole messages.
-            # if at least one PDU has event driven behavior set it at the
+            # If at least one PDU has event driven behavior set it at the
             # message level
             if dynalt_is_event_driven:
                 is_event_driven = dynalt_is_event_driven
@@ -2351,13 +2370,13 @@ class SystemLoader:
 
 
     def _create_arxml_reference_dicts(self):
-        self._node_to_arxml_path = {}
-        self._arxml_path_to_node = {}
+        self._node_to_arxml_path: Dict[Element, str] = {}
+        self._arxml_path_to_node: Dict[str, Element] = {}
         self._package_default_refbase_path = {}
         # given a package name, produce a refbase label to ARXML path dictionary
         self._package_refbase_paths = {}
 
-        def add_sub_references(elem, elem_path, cur_package_path=""):
+        def add_sub_references(elem: Element, elem_path: str, cur_package_path=""):
             """Recursively add all ARXML references contained within an XML
             element to the dictionaries to handle ARXML references"""
 
@@ -2575,7 +2594,10 @@ class SystemLoader:
             if port_direction.lower() != direction:
                 continue
 
-            frame_port_ref = self._node_to_arxml_path[pdu_port]
+            frame_port_ref = self._node_to_arxml_path.get(pdu_port)
+            if frame_port_ref is None:
+                continue
+
             # NOTE: the relationship is: ECU_INSTANCE -> CONNECTORS -> PDU-PORT
             # here we recover the reference to the ecu by removing the last 2 elements of the path
             ecu_instance_ref = frame_port_ref.rsplit("/", 2)[0]
@@ -2613,9 +2635,14 @@ class SystemLoader:
         for pdu_triggering in pdu_triggerings:
             receivers.update(self._get_pdu_triggering_ecus(pdu_triggering,  "in"))
 
-            pdu_triggering_ref = self._node_to_arxml_path[pdu_triggering]
+            pdu_triggering_ref = self._node_to_arxml_path.get(pdu_triggering)
+            if pdu_triggering_ref is None:
+                continue
+
             sender_pdu_triggering_ref, gateways = pdu_triggering_routes.get(pdu_triggering_ref, (pdu_triggering_ref, []))
-            sender_pdu_triggering = self._arxml_path_to_node[sender_pdu_triggering_ref]
+            sender_pdu_triggering = self._arxml_path_to_node.get(sender_pdu_triggering_ref)
+            if sender_pdu_triggering is None:
+                continue
 
             if len(gateways) > 0:
                 sender_info = " (routed from: " + ",".join(gateways) + ")"

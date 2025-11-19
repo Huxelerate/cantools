@@ -3,7 +3,8 @@ import logging
 import re
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Any, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Set, Tuple, Union
+from xml.etree.ElementTree import Element
 
 from ....conversion import BaseConversion, IdentityConversion
 from ....namedsignalvalue import NamedSignalValue
@@ -13,19 +14,20 @@ from ...internal_database import InternalDatabase
 from ...message import Message
 from ...node import Node
 from ...signal import Signal
-from .bus_specifics import AutosarBusSpecifics
+from .bus_specifics import AutosarBusSpecifics, AutosarCommConnector
 from .database_specifics import AutosarDatabaseSpecifics
 from .end_to_end_properties import AutosarEnd2EndProperties
 from .message_specifics import AutosarMessageSpecifics
 from .node_specifics import AutosarNodeSpecifics
 from .secoc_properties import AutosarSecOCProperties
 from .utils import parse_number_string
+from .gateway import Gateway
 
 LOGGER = logging.getLogger(__name__)
 
 class SystemLoader:
     def __init__(self,
-                 root:Any,
+                 root:Element,
                  strict: bool,
                  best_effort: bool=False,
                  sort_signals:type_sort_signals=sort_signals_by_start_bit):
@@ -99,7 +101,7 @@ class SystemLoader:
 
         self._create_arxml_reference_dicts()
 
-    def autosar_version_newer(self, major, minor=None, patch=None):
+    def autosar_version_newer(self, major: int, minor: Optional[int] = None, patch: Optional[int] = None) -> bool:
         """Returns true iff the AUTOSAR version specified in the ARXML it at
         least as the version specified by the function parameters
 
@@ -151,10 +153,15 @@ class SystemLoader:
 
         buses = self._load_buses(root_packages)
         nodes = self._load_nodes(root_packages)
-        messages = self._load_messages(root_packages, buses)
+        gateways = self._load_gateways(root_packages)
+        pdu_triggering_routes = Gateway.get_pdu_triggering_routes(gateways)
+
+        messages = self._load_messages(root_packages, buses, pdu_triggering_routes)
 
         # the senders and receivers can only be loaded once all
         # messages are known...
+        # NOTE: part of the senders/receivers parsing logic for Autosar 4
+        # has been moved directly during message loading
         self._load_senders_and_receivers(root_packages, messages)
 
         # although there must only be one system globally, it can be
@@ -180,7 +187,7 @@ class SystemLoader:
                                 version=None,
                                 autosar_specifics=autosar_specifics)
 
-    def _load_buses(self, package_list) -> List[Bus]:
+    def _load_buses(self, package_list: Element) -> List[Bus]:
         """Recursively extract all buses of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -247,6 +254,35 @@ class SystemLoader:
                     name = \
                         self._get_unique_arxml_child(physical_channel,
                                                         'SHORT-NAME').text
+                    
+                    # communication connectors
+                    autosar_comm_connectors: List[AutosarCommConnector] = []
+                    comm_connectors = self._get_unique_arxml_child(physical_channel, 'COMM-CONNECTORS')
+                    for comm_connector in comm_connectors or []:
+                        if comm_connector.tag != f'{{{self.xml_namespace}}}COMMUNICATION-CONNECTOR-REF-CONDITIONAL':
+                            continue
+
+                        comm_connector_ref_elem = self._get_unique_arxml_child(comm_connector, 'COMMUNICATION-CONNECTOR-REF')
+                        if comm_connector_ref_elem is None or comm_connector_ref_elem.text is None:
+                            continue
+
+                        comm_connector_ref = comm_connector_ref_elem.text
+                        comm_connector = self._arxml_path_to_node.get(comm_connector_ref)
+                        if comm_connector is None:
+                            continue
+
+                        comm_connector_name_elem = self._get_unique_arxml_child(comm_connector, 'SHORT-NAME')
+                        if comm_connector_name_elem is None or comm_connector_name_elem.text is None:
+                            continue
+
+                        comm_connector_name = comm_connector_name_elem.text
+                        node_ref = comm_connector_ref.rsplit("/", 1)[0]
+
+                        autosar_comm_connectors.append(AutosarCommConnector(
+                            name = comm_connector_name,
+                            ref = comm_connector_ref,
+                            node_ref = node_ref
+                        ))
 
                     # version of the CAN standard
                     proto_version = \
@@ -266,10 +302,15 @@ class SystemLoader:
                         self._get_unique_arxml_child(variant, 'CAN-FD-BAUDRATE')
                     if fd_baudrate is not None:
                         fd_baudrate = parse_number_string(fd_baudrate.text)
+                    
+                    autosar_bus_specifics = AutosarBusSpecifics(
+                        cluster_name=cluster_name, 
+                        comm_connectors=autosar_comm_connectors
+                    )
 
                     buses.append(Bus(name=name,
                                      comment=comments,
-                                     autosar_specifics=AutosarBusSpecifics(cluster_name=cluster_name),
+                                     autosar_specifics=autosar_bus_specifics,
                                      baudrate=baudrate,
                                      fd_baudrate=fd_baudrate))
                 else: # AUTOSAR 3
@@ -367,7 +408,7 @@ class SystemLoader:
 
     # given a list of Message objects and an reference to a PDU by its absolute ARXML path,
     # return the subset of messages of the list which feature the specified PDU.
-    def __get_messages_of_pdu(self, msg_list, pdu_path):
+    def __get_messages_of_pdu(self, msg_list: List[Message], pdu_path):
         pdu_messages = \
             [ x for x in msg_list if pdu_path in x.autosar.pdu_paths ]
 
@@ -390,6 +431,15 @@ class SystemLoader:
         return pdu_messages
 
     def _load_senders_receivers_of_ecu(self, ecu_instance, messages):
+
+        if self.autosar_version_newer(4):
+            # DEPRECATED: for Autosar 4 senders and receivers are read via
+            # _get_can_frame_senders_and_receivers which does not require
+            # the presence of ASSOCIATED-COM-I-PDU-GROUP
+            # TODO: check if we can extend _get_can_frame_senders_and_receivers to
+            # autosar 3 and dismiss this method entirely
+            return
+
         # get the name of the ECU. Note that in cantools, ECUs
         # are called 'nodes' for all intents and purposes...
         ecu_name = \
@@ -570,7 +620,7 @@ class SystemLoader:
                 if message.is_container:
                     message.header_byte_order = container_header_byte_order
 
-    def _load_nodes(self, package_list):
+    def _load_nodes(self, package_list: Element) -> List[Node]:
         """Recursively extract all nodes (ECU-instances in AUTOSAR-speak) of
         all CAN clusters of a list of AUTOSAR packages.
 
@@ -578,7 +628,7 @@ class SystemLoader:
                 packages and their sub-packages
         """
 
-        nodes = []
+        nodes: List[Node] = []
 
         for package in package_list:
             for ecu in self._get_arxml_children(package,
@@ -586,11 +636,20 @@ class SystemLoader:
                                                     'ELEMENTS',
                                                     '*ECU-INSTANCE',
                                                 ]):
-                name = self._get_unique_arxml_child(ecu, "SHORT-NAME").text
-                comments = self._load_comments(ecu)
-                autosar_specifics = AutosarNodeSpecifics()
+                name_elem = self._get_unique_arxml_child(ecu, "SHORT-NAME")
+                if name_elem is None or name_elem.text is None:
+                    # skip ECUs with no name
+                    continue
 
-                nodes.append(Node(name=name,
+                ecu_ref = self._node_to_arxml_path.get(ecu)
+                if ecu_ref is None:
+                    # skip ECUs with no ref
+                    continue
+
+                comments = self._load_comments(ecu)
+                autosar_specifics = AutosarNodeSpecifics(ecu_ref)
+
+                nodes.append(Node(name=name_elem.text,
                                   comment=comments,
                                   autosar_specifics=autosar_specifics))
 
@@ -608,6 +667,47 @@ class SystemLoader:
 
 
         return nodes
+    
+    def _load_gateways(self, package_list: Union[Element, List[Element]]) -> List[Gateway]:
+        """Recursively extract all gateways of
+        all CAN clusters of a list of AUTOSAR packages.
+
+        @return The list of all gateways nodes contained in the given list of
+                packages and their sub-packages
+        """
+        # TODO: check if Autosar 3 also supports gateways
+        if not self.autosar_version_newer(4):
+            return []
+
+        gateways: List[Gateway] = []
+
+        for package in package_list:
+            for gateway in self._get_arxml_children(package, ["ELEMENTS", "*GATEWAY"]):
+                name = self._get_unique_arxml_child(gateway, "SHORT-NAME").text
+                node_ref = self._get_unique_arxml_child(gateway, "ECU-REF").text
+                pdu_mappings = self._get_arxml_children(gateway, ["I-PDU-MAPPINGS", "*I-PDU-MAPPING"])
+                pdu_triggering_routes: List[Tuple[str, str]] = []
+
+                for pdu_mapping in pdu_mappings:
+                    source = self._get_unique_arxml_child(pdu_mapping, "SOURCE-I-PDU-REF")
+                    target = self._get_unique_arxml_child(pdu_mapping, ["TARGET-I-PDU", "TARGET-I-PDU-REF"])
+                    if source is not None and target is not None:
+                        if source.text and target.text:
+                            pdu_triggering_routes.append((source.text, target.text))
+                
+                gateways.append(Gateway(
+                    name = name, 
+                    node_ref = node_ref,
+                    pdu_triggering_routes = pdu_triggering_routes
+                ))
+
+            # handle all sub-packages
+            sub_package_list = package.find('./ns:AR-PACKAGES', self._xml_namespaces)
+
+            if sub_package_list is not None:
+                gateways.extend(self._load_gateways(sub_package_list))
+
+        return gateways
 
     def _load_e2e_properties(self, package_list, messages):
         """Internalize AUTOSAR end-to-end protection properties required for
@@ -689,7 +789,7 @@ class SystemLoader:
             if sub_package_list is not None:
                 self._load_e2e_properties(sub_package_list, messages)
 
-    def _load_messages(self, package_list, buses: Iterable[Bus]) -> List[Message]:
+    def _load_messages(self, package_list: Element, buses: Iterable[Bus], pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> List[Message]:
         """Recursively extract all messages of all CAN clusters of a list of
         AUTOSAR packages.
 
@@ -710,7 +810,7 @@ class SystemLoader:
         for package in package_list.iterfind('./ns:AR-PACKAGE',
                                              self._xml_namespaces):
             # deal with the messages of the current package
-            messages.extend(self._load_package_messages(package, buses_by_cluster_name))
+            messages.extend(self._load_package_messages(package, buses_by_cluster_name, pdu_triggering_routes))
 
             # load all sub-packages
             if self.autosar_version_newer(4):
@@ -722,11 +822,14 @@ class SystemLoader:
                                                 self._xml_namespaces)
 
             if sub_package_list is not None:
-                messages.extend(self._load_messages(sub_package_list, buses))
+                messages.extend(self._load_messages(sub_package_list, buses, pdu_triggering_routes))
 
         return messages
 
-    def _load_package_messages(self, package_elem, buses_by_cluster_name: Mapping[AutosarBusSpecifics.AutosarBusSpecificsClusterName, Bus]) -> List[Message]:
+    def _load_package_messages(self, 
+                               package_elem, 
+                               buses_by_cluster_name: Mapping[AutosarBusSpecifics.AutosarBusSpecificsClusterName, Bus], 
+                               pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> List[Message]:
         """This code extracts the information about CAN clusters of an
         individual AR package
         """
@@ -777,17 +880,23 @@ class SystemLoader:
 
             for can_frame_triggering in can_frame_triggerings:
                 messages.append(self._load_message(bus_name,
-                                                   can_frame_triggering))
+                                                   can_frame_triggering, 
+                                                   pdu_triggering_routes))
 
         return messages
 
-    def _load_message(self, bus_name: Optional["Bus.BusName"], can_frame_triggering):
+    def _load_message(self, 
+                      bus_name: Optional["Bus.BusName"], 
+                      can_frame_triggering: Element, 
+                      pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]):
         """Load given message and return a message object.
         """
 
         # Default values.
         cycle_time = None
-        senders = []
+        delay_time = None
+        is_event_driven = False
+        senders, receivers = self._get_can_frame_senders_and_receivers(can_frame_triggering, pdu_triggering_routes)
         autosar_specifics = AutosarMessageSpecifics()
 
         can_frame = self._get_can_frame(can_frame_triggering)
@@ -827,9 +936,11 @@ class SystemLoader:
                            is_fd=is_fd,
                            name=name,
                            length=length,
-                           senders=[],
+                           senders=senders,
                            send_type=None,
                            cycle_time=None,
+                           delay_time=None,
+                           is_event_driven=False,
                            signals=[],
                            contained_messages=None,
                            unused_bit_pattern=0xff,
@@ -846,6 +957,8 @@ class SystemLoader:
             signals, \
             cycle_time, \
             child_pdu_paths, \
+            delay_time, \
+            is_event_driven, \
             contained_messages = \
                 self._load_pdu(pdu, name, 1)
         autosar_specifics._pdu_paths.extend(child_pdu_paths)
@@ -870,6 +983,10 @@ class SystemLoader:
         unused_bit_pattern = \
             0xff if unused_bit_pattern is None \
             else parse_number_string(unused_bit_pattern.text)
+        
+        # specify receivers
+        for signal in signals:
+            signal.receivers = receivers
 
         return Message(bus_name=bus_name,
                        frame_id=frame_id,
@@ -880,6 +997,8 @@ class SystemLoader:
                        senders=senders,
                        send_type=None,
                        cycle_time=cycle_time,
+                       delay_time=delay_time,
+                       is_event_driven=is_event_driven,
                        signals=signals,
                        contained_messages=contained_messages,
                        unused_bit_pattern=unused_bit_pattern,
@@ -983,7 +1102,8 @@ class SystemLoader:
                 auth_tx_bit_length=auth_tx_len)
 
 
-    def _load_pdu(self, pdu, frame_name, next_selector_idx):
+    def _load_pdu(self, pdu: Element, frame_name: str, next_selector_idx: int) \
+        -> Tuple[int, Optional[Union[int, float]], List[Signal], Optional[int], List[str], Optional[int], bool, Optional[List[Message]]]:
         is_secured = pdu.tag == f'{{{self.xml_namespace}}}SECURED-I-PDU'
         is_container = pdu.tag == f'{{{self.xml_namespace}}}CONTAINER-I-PDU'
         is_multiplexed = pdu.tag == f'{{{self.xml_namespace}}}MULTIPLEXED-I-PDU'
@@ -1004,6 +1124,8 @@ class SystemLoader:
                     [], \
                     None, \
                     [], \
+                    None, \
+                    False, \
                     None
 
             contained_pdus = \
@@ -1013,8 +1135,8 @@ class SystemLoader:
                                              '*&CONTAINED-PDU-TRIGGERING',
                                              '&I-PDU'
                                          ])
-            child_pdu_paths = []
-            contained_messages = []
+            child_pdu_paths: List[str] = []
+            contained_messages: Optional[List[Message]] = []
             for contained_pdu in contained_pdus:
                 name = \
                     self._get_unique_arxml_child(contained_pdu, 'SHORT-NAME')
@@ -1048,6 +1170,8 @@ class SystemLoader:
                     signals, \
                     cycle_time, \
                     contained_pdu_paths, \
+                    delay_time, \
+                    is_event_driven, \
                     contained_inner_messages = \
                         self._load_pdu(contained_pdu,
                                        frame_name,
@@ -1087,6 +1211,8 @@ class SystemLoader:
                             name=name,
                             length=length,
                             cycle_time=cycle_time,
+                            delay_time=delay_time,
+                            is_event_driven=is_event_driven,
                             signals=signals,
                             unused_bit_pattern=unused_bit_pattern,
                             comment=comments,
@@ -1101,6 +1227,8 @@ class SystemLoader:
                 [], \
                 None, \
                 child_pdu_paths, \
+                None, \
+                False, \
                 contained_messages
 
         elif is_secured:
@@ -1117,6 +1245,8 @@ class SystemLoader:
                 signals, \
                 cycle_time, \
                 child_pdu_paths, \
+                delay_time, \
+                is_event_driven, \
                 contained_messages = \
                     self._load_pdu(payload_pdu, frame_name, next_selector_idx)
 
@@ -1128,6 +1258,8 @@ class SystemLoader:
                 signals, \
                 cycle_time, \
                 child_pdu_paths, \
+                delay_time, \
+                is_event_driven, \
                 contained_messages
 
         # load all data associated with this PDU.
@@ -1162,13 +1294,45 @@ class SystemLoader:
         cycle_time = None
         if time_period is not None:
             cycle_time = int(float(time_period.text) * 1000)
+        
+        if self.autosar_version_newer(4):
+            time_offset_location = [
+                'I-PDU-TIMING-SPECIFICATIONS',
+                'I-PDU-TIMING',
+                'TRANSMISSION-MODE-DECLARATION',
+                'TRANSMISSION-MODE-TRUE-TIMING',
+                'CYCLIC-TIMING',
+                'TIME-OFFSET',
+                'VALUE',
+            ]
+            time_offset = self._get_unique_arxml_child(pdu, time_offset_location)
+        else:
+            # TODO: check if there is a corresponding location for Autosar 3
+            time_offset = None
+        
+        delay_time = None
+        if time_offset is not None:
+            delay_time = int(float(time_offset.text) * 1000)
+
+        if self.autosar_version_newer(4):
+            event_controlled_timing_location = [
+                'I-PDU-TIMING-SPECIFICATIONS',
+                'I-PDU-TIMING',
+                'TRANSMISSION-MODE-DECLARATION',
+                'TRANSMISSION-MODE-TRUE-TIMING',
+                'EVENT-CONTROLLED-TIMING'
+            ]
+            is_event_driven = self._get_unique_arxml_child(pdu, event_controlled_timing_location) is not None
+        else:
+            # TODO: check if there is a corresponding location for Autosar 3
+            is_event_driven = False
 
         # ordinary non-multiplexed message
         signals = self._load_pdu_signals(pdu)
 
         if is_multiplexed:
             # multiplexed signals
-            pdu_signals, cycle_time, child_pdu_paths = \
+            pdu_signals, cycle_time, delay_time, is_event_driven, child_pdu_paths = \
                 self._load_multiplexed_pdu(pdu, frame_name, next_selector_idx)
             signals.extend(pdu_signals)
 
@@ -1178,10 +1342,13 @@ class SystemLoader:
             signals, \
             cycle_time, \
             child_pdu_paths, \
+            delay_time, \
+            is_event_driven, \
             None
 
-    def _load_multiplexed_pdu(self, pdu, frame_name, next_selector_idx):
-        child_pdu_paths = []
+    def _load_multiplexed_pdu(self, pdu: Element, frame_name: str, next_selector_idx: int) \
+        -> Tuple[List[Signal], Optional[int], Optional[int], bool, List[str]]:
+        child_pdu_paths: List[str] = []
 
         selector_pos = \
             self._get_unique_arxml_child(pdu, 'SELECTOR-FIELD-START-POSITION')
@@ -1233,10 +1400,25 @@ class SystemLoader:
         # the cycle time of the message
         cycle_time = None
 
+        # the delay time of the message
+        delay_time = None
+        all_same_delay = True
+
+        # whether the message is event driven
+        is_event_driven = False
+
         for dynalt in self._get_arxml_children(pdu, dynpart_spec):
-            dynalt_selector_value = \
+            dynalt_selector_value_child = \
                 self._get_unique_arxml_child(dynalt, 'SELECTOR-FIELD-CODE')
-            dynalt_selector_value = parse_number_string(dynalt_selector_value.text)
+            
+            if dynalt_selector_value_child is None and self._best_effort:
+                # TODO: This should be enforced by the ARXML standard.
+                #       For now, if the selector field code is missing
+                #       we skip the dynamic alternative
+                LOGGER.warning(f"Skipping dynamic alternative {dynalt} of multiplexed PDU since SELECTOR-FIELD-CODE is missing")
+                continue
+
+            dynalt_selector_value = parse_number_string(dynalt_selector_value_child.text)
             dynalt_pdu = self._get_unique_arxml_child(dynalt, '&I-PDU')
             dynalt_pdu_ref = self._get_unique_arxml_child(dynalt, 'I-PDU-REF')
             dynalt_pdu_ref = \
@@ -1250,11 +1432,13 @@ class SystemLoader:
                 dynalt_signals, \
                 dynalt_cycle_time, \
                 dynalt_child_pdu_paths, \
+                dynalt_delay_time, \
+                dynalt_is_event_driven, \
                 _ \
                 = self._load_pdu(dynalt_pdu, frame_name, next_selector_idx)
             child_pdu_paths.extend(dynalt_child_pdu_paths)
 
-            # cantools does not a concept for the cycle time of
+            # cantools does not have a concept of cycle time of
             # individual PDUs, but only one for whole messages. We
             # thus use the minimum cycle time of any dynamic part
             # alternative as the cycle time of the multiplexed message
@@ -1263,6 +1447,24 @@ class SystemLoader:
                     cycle_time = min(cycle_time, dynalt_cycle_time)
                 else:
                     cycle_time = dynalt_cycle_time
+            
+            # cantools does not have a concept of delay time of
+            # individual PDUs, but only one for whole messages. 
+            # We set a delay time only if all the PDUs have the same
+            # delay time
+            if dynalt_delay_time is None:
+                all_same_delay = False
+            if delay_time is not None and delay_time != dynalt_cycle_time:
+                all_same_delay = False
+            
+            delay_time = dynalt_delay_time if all_same_delay else None
+
+            # cantools does not have a concept of event driven of
+            # individual PDUs, but only one for whole messages.
+            # If at least one PDU has event driven behavior set it at the
+            # message level
+            if dynalt_is_event_driven:
+                is_event_driven = dynalt_is_event_driven
 
             is_initial = \
                 self._get_unique_arxml_child(dynalt, 'INITIAL-DYNAMIC-PART')
@@ -1366,15 +1568,17 @@ class SystemLoader:
                 _, \
                 static_child_pdu_paths, \
                 _, \
+                _, \
+                _, \
                 = self._load_pdu(static_pdu, frame_name, next_selector_idx)
 
             child_pdu_paths.extend(static_child_pdu_paths)
             signals.extend(static_signals)
 
-        return signals, cycle_time, child_pdu_paths
+        return signals, cycle_time, delay_time, is_event_driven, child_pdu_paths
 
     def _load_pdu_signals(self, pdu):
-        signals = []
+        signals: List[Signal] = []
 
         if self.autosar_version_newer(4):
             # in AR4, "normal" PDUs use I-SIGNAL-TO-PDU-MAPPINGS whilst network
@@ -2166,13 +2370,13 @@ class SystemLoader:
 
 
     def _create_arxml_reference_dicts(self):
-        self._node_to_arxml_path = {}
-        self._arxml_path_to_node = {}
+        self._node_to_arxml_path: Dict[Element, str] = {}
+        self._arxml_path_to_node: Dict[str, Element] = {}
         self._package_default_refbase_path = {}
         # given a package name, produce a refbase label to ARXML path dictionary
         self._package_refbase_paths = {}
 
-        def add_sub_references(elem, elem_path, cur_package_path=""):
+        def add_sub_references(elem: Element, elem_path: str, cur_package_path=""):
             """Recursively add all ARXML references contained within an XML
             element to the dictionaries to handle ARXML references"""
 
@@ -2249,7 +2453,7 @@ class SystemLoader:
         self._arxml_path_to_node = {}
         add_sub_references(self._root, '')
 
-    def _get_arxml_children(self, base_elems, children_location):
+    def _get_arxml_children(self, base_elems: Union[Element, List[Element]], children_location: Union[str, List[str]]) -> List[Element]:
         """Locate a set of ElementTree child nodes at a given location.
 
         This is a method that retrieves a list of ElementTree nodes
@@ -2357,7 +2561,7 @@ class SystemLoader:
 
         return base_elems
 
-    def _get_unique_arxml_child(self, base_elem, child_location):
+    def _get_unique_arxml_child(self, base_elem: Element, child_location: Union[str, List[str]]):
         """This method does the same as get_arxml_children, but it assumes
         that the location yields at most a single node.
 
@@ -2376,8 +2580,79 @@ class SystemLoader:
             raise ValueError(f'{child_location} does not resolve into a '
                              f'unique node')
 
-    def _get_can_frame(self, can_frame_triggering):
+    def _get_can_frame(self, can_frame_triggering: Element):
         return self._get_unique_arxml_child(can_frame_triggering, '&FRAME')
+
+    def _get_pdu_triggering_ecus(self, pdu_triggering: Element, direction: Literal["in", "out"]) -> Set[str]:
+        """Return the ECU names that are sending (direction=out) or receiving (direction=in) 
+        a PDU-TRIGGERING
+        """
+        pdu_ports = self._get_arxml_children(pdu_triggering, ["I-PDU-PORT-REFS", "*&I-PDU-PORT"])
+        ecu_names: Set[str] = set()
+        for pdu_port in pdu_ports:
+            port_direction = self._get_unique_arxml_child(pdu_port, "COMMUNICATION-DIRECTION").text.lower()
+            if port_direction.lower() != direction:
+                continue
+
+            frame_port_ref = self._node_to_arxml_path.get(pdu_port)
+            if frame_port_ref is None:
+                continue
+
+            # NOTE: the relationship is: ECU_INSTANCE -> CONNECTORS -> PDU-PORT
+            # here we recover the reference to the ecu by removing the last 2 elements of the path
+            ecu_instance_ref = frame_port_ref.rsplit("/", 2)[0]
+            ecu_instance = self._arxml_path_to_node.get(ecu_instance_ref)
+            if ecu_instance is None:
+                continue
+                        
+            ecu_name = self._get_unique_arxml_child(ecu_instance, "SHORT-NAME").text
+            ecu_names.add(ecu_name)
+
+        return ecu_names
+
+    def _get_can_frame_senders_and_receivers(self, can_frame_triggering: Element, pdu_triggering_routes: Dict[str, Tuple[str, List[str]]]) -> Tuple[List[str], List[str]]:
+        """Returns the list of senders and receivers for a given CAN-FRAME-TRIGGERING
+        
+        A sender is the actual ECU producing the frame, 
+        with optional gateways to reach the bus shown in parantheses.
+        The receiver is the ECU receiving the frame, 
+        regardless if the ECU is a direct consumer or routes the message via a gateway.
+        """
+
+        # TODO: check if can adapt this approach also for Autosar 3
+        if not self.autosar_version_newer(4):
+            return []
+
+        # NOTE: usually a single PDU-TRIGGERING is exepcted for a CAN-FRAME-TRIGGERING
+        # but frames referring a MULTIPLEXED-I-PDU (i.e. frames that can data format depending a static mux field)#
+        # can refer multiple PDU-TRIGGERING one for each group of signals (mux signal, static signals, dynamic signals1, dynamic signals2, ....)
+        pdu_triggerings = self._get_arxml_children(can_frame_triggering, ["PDU-TRIGGERINGS", "*PDU-TRIGGERING-REF-CONDITIONAL", "&PDU-TRIGGERING"])
+        if not pdu_triggerings:
+            return []
+
+        senders: Set[str] = set()
+        receivers: Set[str] = set()
+        for pdu_triggering in pdu_triggerings:
+            receivers.update(self._get_pdu_triggering_ecus(pdu_triggering,  "in"))
+
+            pdu_triggering_ref = self._node_to_arxml_path.get(pdu_triggering)
+            if pdu_triggering_ref is None:
+                continue
+
+            sender_pdu_triggering_ref, gateways = pdu_triggering_routes.get(pdu_triggering_ref, (pdu_triggering_ref, []))
+            sender_pdu_triggering = self._arxml_path_to_node.get(sender_pdu_triggering_ref)
+            if sender_pdu_triggering is None:
+                continue
+
+            if len(gateways) > 0:
+                sender_info = " (routed from: " + ",".join(gateways) + ")"
+            else:
+                sender_info = ""
+
+            for sender in self._get_pdu_triggering_ecus(sender_pdu_triggering, "out"):
+                senders.add(f"{sender}{sender_info}")
+
+        return sorted(list(senders)), sorted(list(receivers))
 
     def _get_i_signal(self, i_signal_to_i_pdu_mapping):
         if self.autosar_version_newer(4):
@@ -2387,7 +2662,7 @@ class SystemLoader:
             return self._get_unique_arxml_child(i_signal_to_i_pdu_mapping,
                                                 '&SIGNAL')
 
-    def _get_pdu(self, can_frame):
+    def _get_pdu(self, can_frame: Element):
         return self._get_unique_arxml_child(can_frame,
                                             [
                                                 'PDU-TO-FRAME-MAPPINGS',
@@ -2395,7 +2670,7 @@ class SystemLoader:
                                                 '&PDU'
                                             ])
 
-    def _get_pdu_path(self, can_frame):
+    def _get_pdu_path(self, can_frame: Element):
         pdu_ref = self._get_unique_arxml_child(can_frame,
                                                [
                                                    'PDU-TO-FRAME-MAPPINGS',
